@@ -4,6 +4,7 @@ import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import axios from 'axios'
 import { processExcelData, StudentData, TeacherData } from '@/utils/bulkRegistrationUtils'
+import Notification from './Notification'
 
 interface MigrationModalProps {
   isOpen: boolean
@@ -11,6 +12,11 @@ interface MigrationModalProps {
 }
 
 type TabType = 'upload' | 'preview' | 'results'
+
+interface NotificationState {
+  message: string
+  type: 'success' | 'error' | 'warning' | 'info'
+}
 
 export default function MigrationModal({ isOpen, onClose }: MigrationModalProps) {
   const [file, setFile] = useState<File | null>(null)
@@ -25,6 +31,11 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
   const [failedUsers, setFailedUsers] = useState<Array<{ user: any; error: string }>>([])
   const [activeTab, setActiveTab] = useState<TabType>('upload')
   const [result, setResult] = useState<any>(null)
+  const [notification, setNotification] = useState<NotificationState | null>(null)
+
+  const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
+    setNotification({ message, type })
+  }
 
   if (!isOpen) return null
 
@@ -55,12 +66,12 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
 
   const handleProcessFile = async () => {
     if (!file) {
-      alert('Please select an Excel file to process')
+      showNotification('Please select an Excel file to process', 'warning')
       return
     }
 
     if (!schoolPrefix || schoolPrefix.trim().length === 0) {
-      alert('Please enter a school code')
+      showNotification('Please enter a school code', 'warning')
       return
     }
 
@@ -91,7 +102,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
             .filter(row => row.fullName && row.grade)
 
           if (excelRows.length === 0) {
-            alert('No valid data found in Excel file')
+            showNotification('No valid data found in Excel file', 'warning')
             setIsProcessing(false)
             return
           }
@@ -108,33 +119,33 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
 
           if (processed.students.length > 0) {
             setActiveTab('preview')
-            alert(`Found ${processed.students.length} student(s) and ${processed.teachers.length} teacher(s)`)
+            showNotification(`Found ${processed.students.length} student(s) and ${processed.teachers.length} teacher(s)`, 'success')
           }
 
           setIsProcessing(false)
         } catch (parseError) {
           console.error('Excel parsing error:', parseError)
-          alert('Failed to parse Excel file. Please check the file format.')
+          showNotification('Failed to parse Excel file. Please check the file format.', 'error')
           setIsProcessing(false)
         }
       }
 
       reader.onerror = () => {
-        alert('Failed to read the file')
+        showNotification('Failed to read the file', 'error')
         setIsProcessing(false)
       }
 
       reader.readAsArrayBuffer(file)
     } catch (error) {
       console.error('File processing error:', error)
-      alert(error instanceof Error ? error.message : 'Unknown error')
+      showNotification(error instanceof Error ? error.message : 'Unknown error', 'error')
       setIsProcessing(false)
     }
   }
 
   const handleCreateUsers = async () => {
     if (students.length === 0 && teachers.length === 0) {
-      alert('Please process an Excel file first')
+      showNotification('Please process an Excel file first', 'warning')
       return
     }
 
@@ -210,11 +221,12 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
       const failCount = allFailed.length
       const classErrorCount = apiResult.ListClassError?.length || 0
 
-      alert(`Created ${successCount} users, ${apiResult.ListDataClasses?.length || 0} classes. ${failCount > 0 ? `${failCount} users failed.` : ''} ${classErrorCount > 0 ? `${classErrorCount} classes failed.` : ''}`)
+      const message = `Created ${successCount} users, ${apiResult.ListDataClasses?.length || 0} classes. ${failCount > 0 ? `${failCount} users failed.` : ''} ${classErrorCount > 0 ? `${classErrorCount} classes failed.` : ''}`
+      showNotification(message, successCount > 0 ? 'success' : 'error')
     } catch (error) {
       console.error('Migration error:', error)
       setIsCreating(false)
-      alert(error instanceof Error ? error.message : 'Unknown error occurred')
+      showNotification(error instanceof Error ? error.message : 'Unknown error occurred', 'error')
     }
   }
 
@@ -597,6 +609,14 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
           )}
         </div>
       </div>
+
+      {notification && (
+        <Notification
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+        />
+      )}
     </div>
   )
 }
