@@ -3,50 +3,85 @@
 import { useState } from 'react'
 import * as XLSX from 'xlsx'
 import axios from 'axios'
+import { processExcelData, StudentData, TeacherData } from '@/utils/bulkRegistrationUtils'
 
 interface MigrationModalProps {
   isOpen: boolean
   onClose: () => void
 }
 
-interface UserData {
-  username: string
-  displayName: string
-  password: string
-  classses: string
-  phoneNumber: string
-}
+type TabType = 'upload' | 'preview' | 'results'
 
 export default function MigrationModal({ isOpen, onClose }: MigrationModalProps) {
   const [file, setFile] = useState<File | null>(null)
   const [schoolPrefix, setSchoolPrefix] = useState('')
+  const [students, setStudents] = useState<StudentData[]>([])
+  const [teachers, setTeachers] = useState<TeacherData[]>([])
+  const [errors, setErrors] = useState<Array<{ row: number; message: string }>>([])
   const [isProcessing, setIsProcessing] = useState(false)
+  const [isCreating, setIsCreating] = useState(false)
+  const [createProgress, setCreateProgress] = useState(0)
+  const [createdUsers, setCreatedUsers] = useState<any[]>([])
+  const [failedUsers, setFailedUsers] = useState<Array<{ user: any; error: string }>>([])
+  const [activeTab, setActiveTab] = useState<TabType>('upload')
   const [result, setResult] = useState<any>(null)
 
   if (!isOpen) return null
 
+  const handleClose = () => {
+    setFile(null)
+    setSchoolPrefix('')
+    setStudents([])
+    setTeachers([])
+    setErrors([])
+    setIsProcessing(false)
+    setIsCreating(false)
+    setCreateProgress(0)
+    setCreatedUsers([])
+    setFailedUsers([])
+    setResult(null)
+    setActiveTab('upload')
+    onClose()
+  }
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0])
-      setResult(null)
+      setStudents([])
+      setTeachers([])
+      setErrors([])
     }
   }
 
-  const processExcelFile = async (): Promise<{ students: UserData[], teachers: UserData[], classes: UserData[] }> => {
-    if (!file) throw new Error('No file selected')
+  const handleProcessFile = async () => {
+    if (!file) {
+      alert('Please select an Excel file to process')
+      return
+    }
 
-    return new Promise((resolve, reject) => {
+    if (!schoolPrefix || schoolPrefix.trim().length === 0) {
+      alert('Please enter a school code')
+      return
+    }
+
+    setIsProcessing(true)
+    setStudents([])
+    setTeachers([])
+    setErrors([])
+
+    try {
       const reader = new FileReader()
 
       reader.onload = (e) => {
         try {
           const data = new Uint8Array(e.target?.result as ArrayBuffer)
           const workbook = XLSX.read(data, { type: 'array' })
-          const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
-          const jsonData = XLSX.utils.sheet_to_json(firstSheet, {
-            header: ['fullName', 'grade', 'phoneNumber']
-          })
 
+          // Get first sheet
+          const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: ['fullName', 'grade', 'phoneNumber'] })
+
+          // Filter out empty rows
           const excelRows = jsonData
             .map((row: any) => ({
               fullName: row.fullName?.toString().trim() || '',
@@ -55,100 +90,132 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
             }))
             .filter(row => row.fullName && row.grade)
 
-          // Process data similar to BulkUserRegistrationModal
-          const students: UserData[] = []
-          const teachers: UserData[] = []
-          const classesSet = new Set<string>()
+          if (excelRows.length === 0) {
+            alert('No valid data found in Excel file')
+            setIsProcessing(false)
+            return
+          }
 
-          excelRows.forEach((row) => {
-            const gradeMatch = row.grade.match(/^(\d+)([A-Za-z]+)$/)
-            if (!gradeMatch) return
+          // Process the data
+          const processed = processExcelData(
+            excelRows,
+            schoolPrefix.trim().toLowerCase()
+          )
 
-            const gradeNum = gradeMatch[1]
-            const className = row.grade.toLowerCase()
-            classesSet.add(className)
+          setStudents(processed.students)
+          setTeachers(processed.teachers)
+          setErrors(processed.errors)
 
-            // Generate username from full name
-            const nameParts = row.fullName.toLowerCase().split(' ')
-            const lastName = nameParts[nameParts.length - 1]
-            const firstName = nameParts.slice(0, -1).join('')
-            const username = `${schoolPrefix}${lastName}${firstName}`
+          if (processed.students.length > 0) {
+            setActiveTab('preview')
+            alert(`Found ${processed.students.length} student(s) and ${processed.teachers.length} teacher(s)`)
+          }
 
-            students.push({
-              username: username,
-              displayName: row.fullName,
-              password: '123456', // Default password
-              classses: className,
-              phoneNumber: row.phoneNumber
-            })
-
-            // Create teacher (one per class)
-            const teacherUsername = `${schoolPrefix}gv${className}`
-            if (!teachers.find(t => t.username === teacherUsername)) {
-              teachers.push({
-                username: teacherUsername,
-                displayName: `Teacher ${className.toUpperCase()}`,
-                password: '123456',
-                classses: className,
-                phoneNumber: ''
-              })
-            }
-          })
-
-          const classes: UserData[] = Array.from(classesSet).map(className => ({
-            username: className,
-            displayName: '',
-            password: '',
-            classses: className,
-            phoneNumber: ''
-          }))
-
-          resolve({ students, teachers, classes })
-        } catch (error) {
-          reject(error)
+          setIsProcessing(false)
+        } catch (parseError) {
+          console.error('Excel parsing error:', parseError)
+          alert('Failed to parse Excel file. Please check the file format.')
+          setIsProcessing(false)
         }
       }
 
-      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.onerror = () => {
+        alert('Failed to read the file')
+        setIsProcessing(false)
+      }
+
       reader.readAsArrayBuffer(file)
-    })
-  }
-
-  const handleSubmit = async () => {
-    if (!file || !schoolPrefix) {
-      alert('Please select a file and enter school prefix')
-      return
-    }
-
-    setIsProcessing(true)
-    setResult(null)
-
-    try {
-      const { students, teachers, classes } = await processExcelFile()
-
-      // Call API
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
-      const response = await axios.post(`${apiUrl}/api/migrate`, {
-        ListDataStudent: students,
-        ListDataTeacher: teachers,
-        ListDataClasses: classes
-      })
-
-      setResult(response.data)
-      alert('Migration completed!')
     } catch (error) {
-      console.error('Migration error:', error)
-      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
-    } finally {
+      console.error('File processing error:', error)
+      alert(error instanceof Error ? error.message : 'Unknown error')
       setIsProcessing(false)
     }
   }
 
-  const handleClose = () => {
-    setFile(null)
-    setSchoolPrefix('')
-    setResult(null)
-    onClose()
+  const handleCreateUsers = async () => {
+    if (students.length === 0 && teachers.length === 0) {
+      alert('Please process an Excel file first')
+      return
+    }
+
+    setIsCreating(true)
+    setCreateProgress(0)
+    setCreatedUsers([])
+    setFailedUsers([])
+
+    try {
+      // Prepare student data
+      const listDataStudent = students.map(student => ({
+        username: student.username,
+        displayName: student.displayName,
+        password: student.password,
+        classses: student.className,
+        phoneNumber: student.phoneNumber || ''
+      }))
+
+      // Prepare teacher data
+      const listDataTeacher = teachers.map(teacher => ({
+        username: teacher.username,
+        displayName: teacher.displayName,
+        password: teacher.password,
+        classses: teacher.className,
+        phoneNumber: ''
+      }))
+
+      // Prepare class data (unique classes from students only)
+      const uniqueClasses = Array.from(new Set(students.map(s => s.className)))
+      const listDataClasses = uniqueClasses.map(className => ({
+        username: className,
+        displayName: '',
+        password: '',
+        classses: className,
+        phoneNumber: ''
+      }))
+
+      setCreateProgress(30)
+
+      // Call API
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
+      const response = await axios.post(`${apiUrl}/api/migrate`, {
+        ListDataStudent: listDataStudent,
+        ListDataTeacher: listDataTeacher,
+        ListDataClasses: listDataClasses
+      })
+
+      setCreateProgress(80)
+
+      // Process response
+      const apiResult = response.data
+      setResult(apiResult)
+
+      // Mark created users
+      const allCreated = [
+        ...(apiResult.ListDataStudent || []).map((s: any) => ({ username: s.username, displayName: s.displayName, role: 'Student' })),
+        ...(apiResult.ListDataTeacher || []).map((t: any) => ({ username: t.username, displayName: t.displayName, role: 'Teacher' }))
+      ]
+      setCreatedUsers(allCreated)
+
+      // Mark failed users
+      const allFailed = (apiResult.ListUserError || []).map((u: any) => ({
+        user: { username: u.username, displayName: u.displayName },
+        error: u.Reason || 'Failed to create user'
+      }))
+      setFailedUsers(allFailed)
+
+      setCreateProgress(100)
+      setIsCreating(false)
+      setActiveTab('results')
+
+      const successCount = allCreated.length
+      const failCount = allFailed.length
+      const classErrorCount = apiResult.ListClassError?.length || 0
+
+      alert(`Created ${successCount} users, ${apiResult.ListDataClasses?.length || 0} classes. ${failCount > 0 ? `${failCount} users failed.` : ''} ${classErrorCount > 0 ? `${classErrorCount} classes failed.` : ''}`)
+    } catch (error) {
+      console.error('Migration error:', error)
+      setIsCreating(false)
+      alert(error instanceof Error ? error.message : 'Unknown error occurred')
+    }
   }
 
   return (
@@ -164,92 +231,370 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
       <div style={{
         backgroundColor: 'white',
         borderRadius: '8px',
-        padding: '24px',
         width: '90%',
-        maxWidth: '600px',
-        maxHeight: '80vh',
-        overflow: 'auto'
+        maxWidth: '1200px',
+        maxHeight: '90vh',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
       }}>
-        <h2 style={{ marginBottom: '20px', fontSize: '20px', fontWeight: 'bold' }}>
-          Bulk User Migration
-        </h2>
-
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-            School Prefix
-          </label>
-          <input
-            type="text"
-            value={schoolPrefix}
-            onChange={(e) => setSchoolPrefix(e.target.value)}
-            placeholder="e.g., hytkltt"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #ddd',
-              borderRadius: '4px'
-            }}
-          />
+        {/* Header */}
+        <div style={{ padding: '20px', borderBottom: '1px solid #e5e7eb' }}>
+          <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold' }}>
+            Bulk User Migration
+          </h2>
         </div>
 
-        <div style={{ marginBottom: '16px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
-            Excel File
-          </label>
-          <input
-            type="file"
-            accept=".xlsx,.xls"
-            onChange={handleFileChange}
-            style={{
-              width: '100%',
-              padding: '8px',
-              border: '1px solid #ddd',
-              borderRadius: '4px'
-            }}
-          />
-          <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-            Excel format: Column 1: Full name, Column 2: Grade (e.g., 1A, 2B), Column 3: Phone number
-          </p>
-        </div>
-
-        {result && (
-          <div style={{ marginBottom: '16px', padding: '12px', backgroundColor: '#f0f9ff', borderRadius: '4px' }}>
-            <h3 style={{ fontWeight: '500', marginBottom: '8px' }}>Results:</h3>
-            <p>Students created: {result.ListDataStudent?.length || 0}</p>
-            <p>Teachers created: {result.ListDataTeacher?.length || 0}</p>
-            <p>Classes created: {result.ListDataClasses?.length || 0}</p>
-            <p style={{ color: '#dc2626' }}>Failed users: {result.ListUserError?.length || 0}</p>
-            <p style={{ color: '#dc2626' }}>Failed classes: {result.ListClassError?.length || 0}</p>
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+        {/* Tabs */}
+        <div style={{ borderBottom: '1px solid #e5e7eb', padding: '0 20px', display: 'flex', gap: '8px' }}>
           <button
-            onClick={handleClose}
-            disabled={isProcessing}
+            onClick={() => setActiveTab('upload')}
             style={{
-              padding: '8px 16px',
-              border: '1px solid #ddd',
-              borderRadius: '4px',
-              backgroundColor: 'white',
-              color: '#333'
-            }}
-          >
-            Close
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={isProcessing || !file || !schoolPrefix}
-            style={{
-              padding: '8px 16px',
+              padding: '12px 16px',
               border: 'none',
-              borderRadius: '4px',
-              backgroundColor: isProcessing ? '#ccc' : '#007bff',
-              color: 'white'
+              background: 'none',
+              borderBottom: activeTab === 'upload' ? '2px solid #007bff' : 'none',
+              color: activeTab === 'upload' ? '#007bff' : '#666',
+              fontWeight: activeTab === 'upload' ? '600' : '400'
             }}
           >
-            {isProcessing ? 'Processing...' : 'Start Migration'}
+            Upload File
           </button>
+          <button
+            onClick={() => setActiveTab('preview')}
+            disabled={students.length === 0}
+            style={{
+              padding: '12px 16px',
+              border: 'none',
+              background: 'none',
+              borderBottom: activeTab === 'preview' ? '2px solid #007bff' : 'none',
+              color: activeTab === 'preview' ? '#007bff' : '#666',
+              fontWeight: activeTab === 'preview' ? '600' : '400',
+              cursor: students.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: students.length === 0 ? 0.5 : 1
+            }}
+          >
+            Preview ({students.length + teachers.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('results')}
+            disabled={createdUsers.length === 0 && failedUsers.length === 0}
+            style={{
+              padding: '12px 16px',
+              border: 'none',
+              background: 'none',
+              borderBottom: activeTab === 'results' ? '2px solid #007bff' : 'none',
+              color: activeTab === 'results' ? '#007bff' : '#666',
+              fontWeight: activeTab === 'results' ? '600' : '400',
+              cursor: createdUsers.length === 0 && failedUsers.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: createdUsers.length === 0 && failedUsers.length === 0 ? 0.5 : 1
+            }}
+          >
+            Results
+          </button>
+        </div>
+
+        {/* Content */}
+        <div style={{ flex: 1, overflow: 'auto', padding: '20px' }}>
+          {/* Upload Tab */}
+          {activeTab === 'upload' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ padding: '12px', backgroundColor: '#e0f2fe', borderRadius: '6px' }}>
+                <p style={{ margin: '0 0 8px 0', fontWeight: '500' }}>Excel File Format:</p>
+                <ul style={{ margin: 0, paddingLeft: '20px' }}>
+                  <li>Column 1: Full name (Vietnamese text)</li>
+                  <li>Column 2: Grade (e.g., 1A, 1B, 2C, etc.)</li>
+                  <li>Column 3: Phone number</li>
+                </ul>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+                  School Code (Prefix) *
+                </label>
+                <input
+                  type="text"
+                  value={schoolPrefix}
+                  onChange={(e) => setSchoolPrefix(e.currentTarget.value)}
+                  placeholder="e.g., hytkltt"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500' }}>
+                  Excel File *
+                </label>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleFileChange}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px'
+                  }}
+                />
+              </div>
+
+              {errors.length > 0 && (
+                <div style={{ padding: '12px', backgroundColor: '#fee2e2', borderRadius: '6px', maxHeight: '150px', overflow: 'auto' }}>
+                  <p style={{ margin: '0 0 8px 0', fontWeight: '500', color: '#dc2626' }}>Parsing Errors:</p>
+                  {errors.map((err, idx) => (
+                    <p key={idx} style={{ margin: '4px 0', fontSize: '14px' }}>
+                      Row {err.row}: {err.message}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Preview Tab */}
+          {activeTab === 'preview' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ padding: '16px', backgroundColor: '#f9fafb', borderRadius: '6px' }}>
+                <p style={{ margin: '0 0 8px 0', fontWeight: '600' }}>Summary</p>
+                <p style={{ margin: '4px 0' }}>Students: {students.length}</p>
+                <p style={{ margin: '4px 0' }}>Teachers: {teachers.length}</p>
+                <p style={{ margin: '4px 0' }}>Classes: {new Set(students.map(s => s.className)).size}</p>
+                <p style={{ margin: '4px 0' }}>Total Users: {students.length + teachers.length}</p>
+              </div>
+
+              {/* Classes */}
+              <div>
+                <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>Classes</h3>
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#f9fafb' }}>
+                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class Name</th>
+                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Teacher</th>
+                        <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Students</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from(new Set(students.map(s => s.className))).map((className) => {
+                        const teacher = teachers.find(t => t.className === className)
+                        const studentCount = students.filter(s => s.className === className).length
+                        return (
+                          <tr key={className}>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{className}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher?.username || '-'}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{studentCount}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Teachers */}
+              {teachers.length > 0 && (
+                <div>
+                  <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>Teachers</h3>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '300px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
+                        <tr>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teachers.map((teacher, idx) => (
+                          <tr key={idx}>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.username}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.displayName}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.password}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.className}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Students */}
+              {students.length > 0 && (
+                <div>
+                  <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>Students (First 50)</h3>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
+                        <tr>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Full Name</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Grade</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Phone</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {students.slice(0, 50).map((student, idx) => (
+                          <tr key={idx}>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.fullName}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.username}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.displayName}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.password}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.grade}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.className}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.phoneNumber}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {students.length > 50 && (
+                    <p style={{ marginTop: '8px', fontSize: '14px', color: '#666' }}>
+                      Showing first 50 of {students.length} students
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {isCreating && (
+                <div>
+                  <p style={{ marginBottom: '8px' }}>Creating users...</p>
+                  <div style={{ width: '100%', height: '8px', backgroundColor: '#e5e7eb', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{ width: `${createProgress}%`, height: '100%', backgroundColor: '#007bff', transition: 'width 0.3s' }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Results Tab */}
+          {activeTab === 'results' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', gap: '20px' }}>
+                <div style={{ flex: 1, padding: '20px', backgroundColor: '#f0fdf4', borderRadius: '8px', border: '1px solid #86efac' }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500', color: '#166534' }}>Created</p>
+                  <p style={{ margin: 0, fontSize: '32px', fontWeight: '700', color: '#16a34a' }}>{createdUsers.length}</p>
+                </div>
+                <div style={{ flex: 1, padding: '20px', backgroundColor: '#fef2f2', borderRadius: '8px', border: '1px solid #fca5a5' }}>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500', color: '#991b1b' }}>Failed</p>
+                  <p style={{ margin: 0, fontSize: '32px', fontWeight: '700', color: '#dc2626' }}>{failedUsers.length}</p>
+                </div>
+              </div>
+
+              {failedUsers.length > 0 && (
+                <div>
+                  <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>Failed Users</h3>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
+                        <tr>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
+                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Error</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {failedUsers.map((failed, idx) => (
+                          <tr key={idx}>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{failed.user.username}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{failed.user.displayName}</td>
+                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{failed.error}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '16px 20px', borderTop: '1px solid #e5e7eb', display: 'flex', justifyContent: activeTab === 'preview' ? 'space-between' : 'flex-end', gap: '12px' }}>
+          {activeTab === 'upload' && (
+            <>
+              <button
+                onClick={handleClose}
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  backgroundColor: 'white',
+                  color: '#333'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleProcessFile}
+                disabled={isProcessing || !file || !schoolPrefix}
+                style={{
+                  padding: '8px 16px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  backgroundColor: isProcessing || !file || !schoolPrefix ? '#ccc' : '#007bff',
+                  color: 'white',
+                  cursor: isProcessing || !file || !schoolPrefix ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {isProcessing ? 'Processing...' : 'Process File'}
+              </button>
+            </>
+          )}
+          {activeTab === 'preview' && (
+            <>
+              <button
+                onClick={() => setActiveTab('upload')}
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  backgroundColor: 'white',
+                  color: '#333'
+                }}
+              >
+                Back
+              </button>
+              <button
+                onClick={handleCreateUsers}
+                disabled={isCreating || (students.length === 0 && teachers.length === 0)}
+                style={{
+                  padding: '8px 16px',
+                  border: 'none',
+                  borderRadius: '4px',
+                  backgroundColor: isCreating || (students.length === 0 && teachers.length === 0) ? '#ccc' : '#007bff',
+                  color: 'white',
+                  cursor: isCreating || (students.length === 0 && teachers.length === 0) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {isCreating ? 'Creating...' : 'Create Users'}
+              </button>
+            </>
+          )}
+          {activeTab === 'results' && (
+            <button
+              onClick={handleClose}
+              style={{
+                padding: '8px 16px',
+                border: 'none',
+                borderRadius: '4px',
+                backgroundColor: '#007bff',
+                color: 'white'
+              }}
+            >
+              Close
+            </button>
+          )}
         </div>
       </div>
     </div>
