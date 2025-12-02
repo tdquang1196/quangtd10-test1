@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from 'axios'
+import { getRandomEquipmentSet } from '@/config/equipment'
 
 interface UserData {
   id?: string
@@ -203,16 +204,16 @@ export class MigrationService {
     displayName: string
   ): Promise<boolean> {
     try {
-      // Note: Equipment items would need to be fetched from backend
-      // For now, we'll skip equipment assignment as it requires fetching item catalog
-      // In production, you'd fetch items first and select random ones
+      // Get random equipment set (HEAD, UPPER_BODY, LOWER_BODY, FOOT)
+      const listItem = getRandomEquipmentSet()
 
       await client.post('/account/equipment', {
-        listItem: [], // Empty for now - would need real equipment IDs
+        listItem: listItem,
         displayName: displayName
       })
       return true
     } catch (error) {
+      console.error('Equipment assignment error:', error)
       return false
     }
   }
