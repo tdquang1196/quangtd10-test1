@@ -128,40 +128,27 @@ export function generateTeacherAccount(schoolPrefix: string, grade?: string) {
 }
 
 /**
- * Check if username needs numeric suffix for uniqueness
- * Returns the actual username with suffix if needed
+ * Return username without adding numeric suffix
+ * The backend will handle duplicate usernames by adding numbers
  */
 export function resolveUsernameConflict(
   baseUsername: string,
   existingUsernames: Set<string>
 ): string {
-  let username = baseUsername;
-  let index = 0;
-
-  while (existingUsernames.has(username.toLowerCase())) {
-    index++;
-    username = `${baseUsername}${index}`;
-  }
-
-  return username;
+  // Don't add numbers here - let the backend handle it
+  return baseUsername;
 }
 
 /**
- * Check if display name needs numeric suffix for uniqueness
+ * Return display name without adding numeric suffix
+ * The backend will handle duplicate display names by adding numbers
  */
 export function resolveDisplayNameConflict(
   baseDisplayName: string,
   existingDisplayNames: Set<string>
 ): string {
-  let displayName = baseDisplayName;
-  let index = 0;
-
-  while (existingDisplayNames.has(displayName.toLowerCase())) {
-    index++;
-    displayName = `${baseDisplayName}${index}`;
-  }
-
-  return displayName;
+  // Don't add numbers here - let the backend handle it
+  return baseDisplayName;
 }
 
 /**

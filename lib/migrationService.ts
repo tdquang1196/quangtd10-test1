@@ -238,8 +238,6 @@ export class MigrationService {
   }
 
   private async processUser(user: UserData, listUserError: UserData[]): Promise<void> {
-    console.log(`Processing user: ${user.username}`)
-
     // Check existing usernames
     const existingUsernames = await this.getExistingUsernames(user.username)
     let tempIdx = 0
@@ -307,9 +305,8 @@ export class MigrationService {
           isSubstringUserName = true
           tempDisplayIdx = 0
         } else {
-          user.reason = 'Cannot find valid display name'
-          listUserError.push({ ...user })
-          return
+          baseDisplayName = loginResult.displayName
+          tempDisplayIdx = 0
         }
       } else {
         user.displayName = tryDisplayName
@@ -345,6 +342,13 @@ export class MigrationService {
     teachers: UserData[],
     classes: UserData[]
   ): Promise<MigrationResult> {
+    const startTime = Date.now()
+    const getTimestamp = () => {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false })
+      return `[${now}] [+${elapsed}s]`
+    }
+
     // Login as admin
     await this.loginAdmin()
 
@@ -352,20 +356,26 @@ export class MigrationService {
     const listClassError: UserData[] = []
 
     // Process students
-    console.log(`Processing ${students.length} students...`)
-    for (const student of students) {
+    console.log(`${getTimestamp()} Processing ${students.length} students...`)
+    for (let i = 0; i < students.length; i++) {
+      const student = students[i]
+      console.log(`${getTimestamp()} [${i + 1}/${students.length}] Processing student: ${student.username} (${student.displayName})`)
       await this.processUser(student, listUserError)
     }
 
     // Process teachers
-    console.log(`Processing ${teachers.length} teachers...`)
-    for (const teacher of teachers) {
+    console.log(`${getTimestamp()} Processing ${teachers.length} teachers...`)
+    for (let i = 0; i < teachers.length; i++) {
+      const teacher = teachers[i]
+      console.log(`${getTimestamp()} [${i + 1}/${teachers.length}] Processing teacher: ${teacher.username} (${teacher.displayName})`)
       await this.processUser(teacher, listUserError)
     }
 
     // Process classes
-    console.log(`Processing ${classes.length} classes...`)
-    for (const classItem of classes) {
+    console.log(`${getTimestamp()} Processing ${classes.length} classes...`)
+    for (let i = 0; i < classes.length; i++) {
+      const classItem = classes[i]
+      console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Creating class: ${classItem.username}`)
       try {
         // Create user group
         const groupStudents = students
@@ -373,6 +383,7 @@ export class MigrationService {
           .map(s => s.id)
 
         if (groupStudents.length === 0) {
+          console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Skipping class ${classItem.username} - no students`)
           continue
         }
 
@@ -401,11 +412,19 @@ export class MigrationService {
           teachers: classTeachers,
           grades: classItem.grade ? [classItem.grade] : []
         })
+
+        console.log(`${getTimestamp()} [${i + 1}/${classes.length}] ✅ Class ${classItem.username} created (${groupStudents.length} students, ${classTeachers.length} teachers)`)
       } catch (error) {
-        console.error(`Failed to create class ${classItem.username}:`, error)
+        console.error(`${getTimestamp()} [${i + 1}/${classes.length}] ❌ Failed to create class ${classItem.username}:`, error)
         listClassError.push({ ...classItem })
       }
     }
+
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`${getTimestamp()} Migration completed in ${totalTime}s`)
+    console.log(`${getTimestamp()} Success: ${students.length + teachers.length - listUserError.length} users`)
+    console.log(`${getTimestamp()} Failed: ${listUserError.length} users`)
+    console.log(`${getTimestamp()} Class errors: ${listClassError.length}`)
 
     return {
       listDataStudent: students,

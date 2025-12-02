@@ -455,7 +455,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
               {teachers.length > 0 && (
                 <div>
                   <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>Teachers</h3>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '300px', overflowY: 'auto' }}>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
                         <tr>
@@ -482,7 +482,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
               {students.length > 0 && (
                 <div>
                   <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>Students (First 50)</h3>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto' }}>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
                         <tr>
@@ -562,7 +562,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
               {result && result.ListDataStudent && result.ListDataStudent.filter((s: any) => !result.ListUserError.find((e: any) => e.username === s.username)).length > 0 && (
                 <div>
                   <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600', color: '#059669' }}>✅ Students Created Successfully</h3>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '350px', overflowY: 'auto' }}>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '350px', overflowY: 'auto', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f0fdf4' }}>
                         <tr>
@@ -592,7 +592,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
               {result && result.ListDataTeacher && result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username)).length > 0 && (
                 <div>
                   <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600', color: '#dc2626' }}>👨‍🏫 Teachers Created Successfully</h3>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '350px', overflowY: 'auto' }}>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '350px', overflowY: 'auto', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#fef9c3' }}>
                         <tr>
@@ -663,7 +663,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                       📋 Copy Error Data
                     </button>
                   </div>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto' }}>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto', overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#fee2e2' }}>
                         <tr>
