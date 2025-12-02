@@ -386,7 +386,7 @@ export class MigrationService {
         const classTeachers = teachers
           .filter(t =>
             (t.classses.toLowerCase() === classItem.username.toLowerCase() ||
-             classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())) &&
+              classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())) &&
             t.id
           )
           .map(t => t.id)

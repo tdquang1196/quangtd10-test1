@@ -27,6 +27,9 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [createProgress, setCreateProgress] = useState(0)
+  const [progressMessage, setProgressMessage] = useState('')
+  const [processedCount, setProcessedCount] = useState(0)
+  const [totalCount, setTotalCount] = useState(0)
   const [createdUsers, setCreatedUsers] = useState<any[]>([])
   const [failedUsers, setFailedUsers] = useState<Array<{ user: any; error: string }>>([])
   const [activeTab, setActiveTab] = useState<TabType>('upload')
@@ -35,6 +38,45 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
 
   const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setNotification({ message, type })
+  }
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      showNotification('Copied to clipboard!', 'success')
+    }).catch(() => {
+      showNotification('Failed to copy', 'error')
+    })
+  }
+
+  const copySuccessData = () => {
+    if (!result) return
+
+    const successData = [
+      ...result.ListDataStudent.filter((s: any) => !result.ListUserError.find((e: any) => e.username === s.username)),
+      ...result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username))
+    ]
+
+    const csvContent = [
+      'Username,Actual Username,Display Name,Actual Display Name,Password,Class,Phone',
+      ...successData.map((u: any) =>
+        `${u.username},${u.actualUserName || u.username},${u.displayName},${u.actualDisplayName || u.displayName},${u.password},${u.classses},${u.phoneNumber || ''}`
+      )
+    ].join('\n')
+
+    copyToClipboard(csvContent)
+  }
+
+  const copyErrorData = () => {
+    if (!result || !result.ListUserError) return
+
+    const csvContent = [
+      'Username,Display Name,Password,Class,Phone,Error Reason',
+      ...result.ListUserError.map((u: any) =>
+        `${u.username},${u.displayName},${u.password},${u.classses},${u.phoneNumber || ''},${u.reason || ''}`
+      )
+    ].join('\n')
+
+    copyToClipboard(csvContent)
   }
 
   if (!isOpen) return null
@@ -151,8 +193,11 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
 
     setIsCreating(true)
     setCreateProgress(0)
+    setProgressMessage('Initializing migration...')
     setCreatedUsers([])
     setFailedUsers([])
+    setTotalCount(students.length + teachers.length)
+    setProcessedCount(0)
 
     try {
       // Prepare student data
@@ -183,7 +228,8 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
         phoneNumber: ''
       }))
 
-      setCreateProgress(30)
+      setCreateProgress(10)
+      setProgressMessage(`Processing ${students.length} students and ${teachers.length} teachers...`)
 
       // Call local API route which uses MigrationService
       const response = await axios.post('/api/migrate', {
@@ -192,7 +238,8 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
         ListDataClasses: listDataClasses
       })
 
-      setCreateProgress(80)
+      setCreateProgress(90)
+      setProgressMessage('Finalizing...')
 
       // Process response
       const apiResult = response.data
@@ -477,10 +524,14 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
               )}
 
               {isCreating && (
-                <div>
-                  <p style={{ marginBottom: '8px' }}>Creating users...</p>
-                  <div style={{ width: '100%', height: '8px', backgroundColor: '#e5e7eb', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${createProgress}%`, height: '100%', backgroundColor: '#007bff', transition: 'width 0.3s' }} />
+                <div style={{ padding: '16px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                  <p style={{ marginBottom: '8px', fontWeight: '600', color: '#1e40af' }}>{progressMessage}</p>
+                  <div style={{ width: '100%', height: '12px', backgroundColor: '#e5e7eb', borderRadius: '6px', overflow: 'hidden', marginBottom: '8px' }}>
+                    <div style={{ width: `${createProgress}%`, height: '100%', backgroundColor: '#3b82f6', transition: 'width 0.3s ease' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#64748b' }}>
+                    <span>Progress: {createProgress}%</span>
+                    <span>Total: {totalCount} users</span>
                   </div>
                 </div>
               )}
@@ -492,7 +543,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
             <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
               <div style={{ display: 'flex', gap: '20px' }}>
                 <div style={{ flex: 1, padding: '20px', backgroundColor: '#f0fdf4', borderRadius: '8px', border: '1px solid #86efac' }}>
-                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500', color: '#166534' }}>Created</p>
+                  <p style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '500', color: '#166534' }}>Created Successfully</p>
                   <p style={{ margin: 0, fontSize: '32px', fontWeight: '700', color: '#16a34a' }}>{createdUsers.length}</p>
                 </div>
                 <div style={{ flex: 1, padding: '20px', backgroundColor: '#fef2f2', borderRadius: '8px', border: '1px solid #fca5a5' }}>
@@ -501,29 +552,122 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                 </div>
               </div>
 
-              {failedUsers.length > 0 && (
+              {/* Success Data Table */}
+              {result && createdUsers.length > 0 && (
                 <div>
-                  <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600' }}>Failed Users</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>Successfully Created Users</h3>
+                    <button
+                      onClick={copySuccessData}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#10b981',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📋 Copy Success Data
+                    </button>
+                  </div>
                   <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
                         <tr>
-                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
-                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
-                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Error</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Actual Username</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Actual Display</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Phone</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {failedUsers.map((failed, idx) => (
-                          <tr key={idx}>
-                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{failed.user.username}</td>
-                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{failed.user.displayName}</td>
-                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{failed.error}</td>
+                        {result.ListDataStudent.filter((s: any) => !result.ListUserError.find((e: any) => e.username === s.username)).map((student: any, idx: number) => (
+                          <tr key={`s-${idx}`}>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.username}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.actualUserName || '-'}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.displayName}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.actualDisplayName || '-'}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.password}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.classses}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.phoneNumber || '-'}</td>
+                          </tr>
+                        ))}
+                        {result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username)).map((teacher: any, idx: number) => (
+                          <tr key={`t-${idx}`} style={{ backgroundColor: '#fef9c3' }}>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.username}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.actualUserName || '-'}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.displayName}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.actualDisplayName || '-'}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.password}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.classses}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>-</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                    💡 Yellow rows are teachers
+                  </p>
+                </div>
+              )}
+
+              {/* Error Data Table */}
+              {result && result.ListUserError && result.ListUserError.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#dc2626' }}>Failed Users (Can Retry)</h3>
+                    <button
+                      onClick={copyErrorData}
+                      style={{
+                        padding: '8px 16px',
+                        backgroundColor: '#dc2626',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      📋 Copy Error Data
+                    </button>
+                  </div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#fee2e2' }}>
+                        <tr>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Phone</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Error Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.ListUserError.map((failed: any, idx: number) => (
+                          <tr key={idx}>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.username}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.displayName}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.password}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.classses}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.phoneNumber || '-'}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', color: '#dc2626' }}>{failed.reason || 'Unknown error'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                    💡 Copy error data, fix issues in Excel, and re-upload only failed users
+                  </p>
                 </div>
               )}
             </div>
