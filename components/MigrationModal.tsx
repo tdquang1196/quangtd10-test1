@@ -185,9 +185,8 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
 
       setCreateProgress(30)
 
-      // Call API
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'
-      const response = await axios.post(`${apiUrl}/api/migrate`, {
+      // Call local API route which uses MigrationService
+      const response = await axios.post('/api/migrate', {
         ListDataStudent: listDataStudent,
         ListDataTeacher: listDataTeacher,
         ListDataClasses: listDataClasses
