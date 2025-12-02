@@ -26,9 +26,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
   const [errors, setErrors] = useState<Array<{ row: number; message: string }>>([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
-  const [createProgress, setCreateProgress] = useState(0)
   const [progressMessage, setProgressMessage] = useState('')
-  const [processedCount, setProcessedCount] = useState(0)
   const [totalCount, setTotalCount] = useState(0)
   const [createdUsers, setCreatedUsers] = useState<any[]>([])
   const [failedUsers, setFailedUsers] = useState<Array<{ user: any; error: string }>>([])
@@ -98,7 +96,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
     setErrors([])
     setIsProcessing(false)
     setIsCreating(false)
-    setCreateProgress(0)
     setCreatedUsers([])
     setFailedUsers([])
     setResult(null)
@@ -201,12 +198,10 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
     }
 
     setIsCreating(true)
-    setCreateProgress(0)
-    setProgressMessage('Initializing migration...')
+    setProgressMessage(`Processing ${students.length} students and ${teachers.length} teachers...`)
     setCreatedUsers([])
     setFailedUsers([])
     setTotalCount(students.length + teachers.length)
-    setProcessedCount(0)
 
     try {
       // Prepare student data
@@ -237,18 +232,12 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
         phoneNumber: ''
       }))
 
-      setCreateProgress(10)
-      setProgressMessage(`Processing ${students.length} students and ${teachers.length} teachers...`)
-
       // Call local API route which uses MigrationService
       const response = await axios.post('/api/migrate', {
         ListDataStudent: listDataStudent,
         ListDataTeacher: listDataTeacher,
         ListDataClasses: listDataClasses
       })
-
-      setCreateProgress(90)
-      setProgressMessage('Finalizing...')
 
       // Process response
       const apiResult = response.data
@@ -268,7 +257,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
       }))
       setFailedUsers(allFailed)
 
-      setCreateProgress(100)
       setIsCreating(false)
       setActiveTab('results')
 
@@ -472,7 +460,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
                         <tr>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
-                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
                         </tr>
@@ -481,7 +468,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                         {teachers.map((teacher, idx) => (
                           <tr key={idx}>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.username}</td>
-                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.displayName}</td>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.password}</td>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{teacher.className}</td>
                           </tr>
@@ -502,7 +488,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                         <tr>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Full Name</th>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
-                          <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Grade</th>
                           <th style={{ padding: '12px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
@@ -514,7 +499,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                           <tr key={idx}>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.fullName}</td>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.username}</td>
-                            <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.displayName}</td>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.password}</td>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.grade}</td>
                             <td style={{ padding: '12px', borderBottom: '1px solid #e5e7eb' }}>{student.className}</td>
@@ -533,14 +517,27 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
               )}
 
               {isCreating && (
-                <div style={{ padding: '16px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
-                  <p style={{ marginBottom: '8px', fontWeight: '600', color: '#1e40af' }}>{progressMessage}</p>
-                  <div style={{ width: '100%', height: '12px', backgroundColor: '#e5e7eb', borderRadius: '6px', overflow: 'hidden', marginBottom: '8px' }}>
-                    <div style={{ width: `${createProgress}%`, height: '100%', backgroundColor: '#3b82f6', transition: 'width 0.3s ease' }} />
+                <div style={{ padding: '20px', backgroundColor: '#f0f9ff', borderRadius: '8px', border: '1px solid #bfdbfe', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      border: '4px solid #e0e7ff',
+                      borderTop: '4px solid #3b82f6',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite'
+                    }} />
+                    <style>{`
+                      @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                      }
+                    `}</style>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', color: '#64748b' }}>
-                    <span>Progress: {createProgress}%</span>
-                    <span>Total: {totalCount} users</span>
+                  <div style={{ textAlign: 'center' }}>
+                    <p style={{ margin: '0 0 4px 0', fontWeight: '600', color: '#1e40af', fontSize: '16px' }}>{progressMessage}</p>
+                    <p style={{ margin: 0, fontSize: '14px', color: '#64748b' }}>Processing {totalCount} users... Please wait.</p>
+                    <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#94a3b8', fontStyle: 'italic' }}>This may take a few minutes depending on the number of users.</p>
                   </div>
                 </div>
               )}
@@ -572,9 +569,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Id</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Actual Username</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Password</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Actual Display Name</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Class</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Phone</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -583,9 +577,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace' }}>{student.id || '-'}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontWeight: '500' }}>{student.actualUserName || student.username}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace', color: '#059669' }}>{student.password}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.actualDisplayName || student.displayName}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.classses}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.phoneNumber || '-'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -608,7 +599,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Id</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Actual Username</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Password</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Actual Display Name</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Class</th>
                         </tr>
                       </thead>
@@ -618,7 +608,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace' }}>{teacher.id || '-'}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontWeight: '500' }}>{teacher.actualUserName || teacher.username}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace', color: '#dc2626' }}>{teacher.password}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.actualDisplayName || teacher.displayName}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.classses}</td>
                           </tr>
                         ))}
@@ -679,7 +668,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                       <thead style={{ position: 'sticky', top: 0, backgroundColor: '#fee2e2' }}>
                         <tr>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
                           <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Phone</th>
@@ -690,7 +678,6 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                         {result.ListUserError.map((failed: any, idx: number) => (
                           <tr key={idx}>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.username}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.displayName}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.password}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.classses}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{failed.phoneNumber || '-'}</td>
