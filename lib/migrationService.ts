@@ -14,30 +14,30 @@ interface UserData {
 }
 
 interface LoginResult {
-  AccessToken: string
-  UserId: string
-  DisplayName: string
+  accessToken: string
+  userId: string
+  displayName: string
 }
 
 interface GetUsersResult {
-  Users: Array<{
-    Username: string
-    DisplayName: string
+  users: Array<{
+    username: string
+    displayName: string
   }>
 }
 
 interface SaveUserGroupResult {
-  UserGroup: {
-    Id: string
+  userGroup: {
+    id: string
   }
 }
 
 interface MigrationResult {
-  ListDataStudent: UserData[]
-  ListDataTeacher: UserData[]
-  ListDataClasses: UserData[]
-  ListUserError: UserData[]
-  ListClassError: UserData[]
+  listDataStudent: UserData[]
+  listDataTeacher: UserData[]
+  listDataClasses: UserData[]
+  listUserError: UserData[]
+  listClassError: UserData[]
 }
 
 const MIN_LENGTH_DISPLAY_NAME = 2
@@ -62,7 +62,7 @@ export class MigrationService {
       password: this.adminPassword
     })
 
-    this.adminToken = response.data.AccessToken
+    this.adminToken = response.data.accessToken
 
     this.adminClient = axios.create({
       baseURL: this.baseUrl,
@@ -78,9 +78,9 @@ export class MigrationService {
         `/manage/Users?pageIndex=1&pageSize=1000&filter=${filter}`
       )
       return new Set(
-        response.data.Users
-          .filter(u => u.Username.toLowerCase().startsWith(filter.toLowerCase()))
-          .map(u => u.Username.toLowerCase())
+        response.data.users
+          .filter(u => u.username.toLowerCase().startsWith(filter.toLowerCase()))
+          .map(u => u.username.toLowerCase())
       )
     } catch (error) {
       return new Set()
@@ -93,9 +93,9 @@ export class MigrationService {
         `/manage/Users?pageIndex=1&pageSize=1000&filter=${filter}`
       )
       return new Set(
-        response.data.Users
-          .filter(u => u.DisplayName.toLowerCase().startsWith(filter.toLowerCase()))
-          .map(u => u.DisplayName.toLowerCase())
+        response.data.users
+          .filter(u => u.displayName.toLowerCase().startsWith(filter.toLowerCase()))
+          .map(u => u.displayName.toLowerCase())
       )
     } catch (error) {
       return new Set()
@@ -267,12 +267,12 @@ export class MigrationService {
       return
     }
 
-    user.id = loginResult.UserId
+    user.id = loginResult.userId
 
     const userClient = axios.create({
       baseURL: this.baseUrl,
       headers: {
-        Authorization: `Bearer ${loginResult.AccessToken}`
+        Authorization: `Bearer ${loginResult.accessToken}`
       }
     })
 
@@ -321,7 +321,7 @@ export class MigrationService {
       userClient,
       user.displayName,
       user.actualUserName,
-      loginResult.DisplayName
+      loginResult.displayName
     )
 
     if (!validatedDisplayName) {
@@ -380,7 +380,7 @@ export class MigrationService {
           users: groupStudents
         })
 
-        const groupId = createGroupResponse.data.UserGroup.Id
+        const groupId = createGroupResponse.data.userGroup.id
 
         // Create class
         const classTeachers = teachers
@@ -407,11 +407,11 @@ export class MigrationService {
     }
 
     return {
-      ListDataStudent: students,
-      ListDataTeacher: teachers,
-      ListDataClasses: classes,
-      ListUserError: listUserError,
-      ListClassError: listClassError
+      listDataStudent: students,
+      listDataTeacher: teachers,
+      listDataClasses: classes,
+      listUserError: listUserError,
+      listClassError: listClassError
     }
   }
 }

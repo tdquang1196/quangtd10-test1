@@ -71,11 +71,20 @@ export async function POST(request: NextRequest) {
     )
 
     console.log('Migration completed')
-    console.log(`Success: ${result.ListDataStudent.length - result.ListUserError.length} users`)
-    console.log(`Failed: ${result.ListUserError.length} users`)
-    console.log(`Class errors: ${result.ListClassError.length}`)
+    console.log(`Success: ${result.listDataStudent.length - result.listUserError.length} users`)
+    console.log(`Failed: ${result.listUserError.length} users`)
+    console.log(`Class errors: ${result.listClassError.length}`)
 
-    return NextResponse.json(result)
+    // Transform to PascalCase for frontend compatibility
+    const response = {
+      ListDataStudent: result.listDataStudent,
+      ListDataTeacher: result.listDataTeacher,
+      ListDataClasses: result.listDataClasses,
+      ListUserError: result.listUserError,
+      ListClassError: result.listClassError
+    }
+
+    return NextResponse.json(response)
   } catch (error) {
     console.error('Migration API error:', error)
 

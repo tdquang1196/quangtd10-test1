@@ -51,15 +51,24 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
   const copySuccessData = () => {
     if (!result) return
 
-    const successData = [
-      ...result.ListDataStudent.filter((s: any) => !result.ListUserError.find((e: any) => e.username === s.username)),
-      ...result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username))
-    ]
+    const successStudents = result.ListDataStudent.filter((s: any) =>
+      !result.ListUserError.find((e: any) => e.username === s.username)
+    )
+    const successTeachers = result.ListDataTeacher.filter((t: any) =>
+      !result.ListUserError.find((e: any) => e.username === t.username)
+    )
 
     const csvContent = [
-      'Username,Actual Username,Display Name,Actual Display Name,Password,Class,Phone',
-      ...successData.map((u: any) =>
-        `${u.username},${u.actualUserName || u.username},${u.displayName},${u.actualDisplayName || u.displayName},${u.password},${u.classses},${u.phoneNumber || ''}`
+      '=== STUDENTS ===',
+      'Id,Actual Username,Password,Actual Display Name,Class,Phone',
+      ...successStudents.map((s: any) =>
+        `${s.id || ''},${s.actualUserName || s.username},${s.password},${s.actualDisplayName || s.displayName},${s.classses},${s.phoneNumber || ''}`
+      ),
+      '',
+      '=== TEACHERS ===',
+      'Id,Actual Username,Password,Actual Display Name,Class',
+      ...successTeachers.map((t: any) =>
+        `${t.id || ''},${t.actualUserName || t.username},${t.password},${t.actualDisplayName || t.displayName},${t.classses}`
       )
     ].join('\n')
 
@@ -552,69 +561,95 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                 </div>
               </div>
 
-              {/* Success Data Table */}
-              {result && createdUsers.length > 0 && (
+              {/* Success Data - Students */}
+              {result && result.ListDataStudent && result.ListDataStudent.filter((s: any) => !result.ListUserError.find((e: any) => e.username === s.username)).length > 0 && (
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>Successfully Created Users</h3>
-                    <button
-                      onClick={copySuccessData}
-                      style={{
-                        padding: '8px 16px',
-                        backgroundColor: '#10b981',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '4px',
-                        fontSize: '14px',
-                        fontWeight: '500',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      📋 Copy Success Data
-                    </button>
-                  </div>
-                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '400px', overflowY: 'auto' }}>
+                  <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600', color: '#059669' }}>✅ Students Created Successfully</h3>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '350px', overflowY: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f9fafb' }}>
+                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#f0fdf4' }}>
                         <tr>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Username</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Actual Username</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Display Name</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Actual Display</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Password</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Class</th>
-                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>Phone</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Id</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Actual Username</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Password</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Actual Display Name</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Class</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #86efac' }}>Phone</th>
                         </tr>
                       </thead>
                       <tbody>
                         {result.ListDataStudent.filter((s: any) => !result.ListUserError.find((e: any) => e.username === s.username)).map((student: any, idx: number) => (
                           <tr key={`s-${idx}`}>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.username}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.actualUserName || '-'}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.displayName}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.actualDisplayName || '-'}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.password}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace' }}>{student.id || '-'}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontWeight: '500' }}>{student.actualUserName || student.username}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace', color: '#059669' }}>{student.password}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.actualDisplayName || student.displayName}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.classses}</td>
                             <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{student.phoneNumber || '-'}</td>
-                          </tr>
-                        ))}
-                        {result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username)).map((teacher: any, idx: number) => (
-                          <tr key={`t-${idx}`} style={{ backgroundColor: '#fef9c3' }}>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.username}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.actualUserName || '-'}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.displayName}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.actualDisplayName || '-'}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.password}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.classses}</td>
-                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>-</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                   <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                    💡 Yellow rows are teachers
+                    Total: {result.ListDataStudent.filter((s: any) => !result.ListUserError.find((e: any) => e.username === s.username)).length} students
                   </p>
+                </div>
+              )}
+
+              {/* Success Data - Teachers */}
+              {result && result.ListDataTeacher && result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username)).length > 0 && (
+                <div>
+                  <h3 style={{ marginBottom: '12px', fontSize: '16px', fontWeight: '600', color: '#dc2626' }}>👨‍🏫 Teachers Created Successfully</h3>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: '6px', overflow: 'hidden', maxHeight: '350px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                      <thead style={{ position: 'sticky', top: 0, backgroundColor: '#fef9c3' }}>
+                        <tr>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Id</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Actual Username</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Password</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Actual Display Name</th>
+                          <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #fbbf24' }}>Class</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username)).map((teacher: any, idx: number) => (
+                          <tr key={`t-${idx}`}>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace' }}>{teacher.id || '-'}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontWeight: '500' }}>{teacher.actualUserName || teacher.username}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb', fontFamily: 'monospace', color: '#dc2626' }}>{teacher.password}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.actualDisplayName || teacher.displayName}</td>
+                            <td style={{ padding: '10px', borderBottom: '1px solid #e5e7eb' }}>{teacher.classses}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                    Total: {result.ListDataTeacher.filter((t: any) => !result.ListUserError.find((e: any) => e.username === t.username)).length} teachers
+                  </p>
+                </div>
+              )}
+
+              {/* Copy Success Data Button */}
+              {result && createdUsers.length > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '20px' }}>
+                  <button
+                    onClick={copySuccessData}
+                    style={{
+                      padding: '12px 24px',
+                      backgroundColor: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '16px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                    }}
+                  >
+                    📋 Copy All Success Data (Students + Teachers)
+                  </button>
                 </div>
               )}
 
