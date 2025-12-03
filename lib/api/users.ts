@@ -12,6 +12,6 @@ export async function givePackageToUser(payload: {
   source: number
   requester: string
 }) {
-  const response = await axiosMeduverse.post(`/manage/GivePackageToUser`, payload)
+  const response = await axiosMeduverse.post(`/Subscription/Admin-Give`, payload)
   return response
 }
