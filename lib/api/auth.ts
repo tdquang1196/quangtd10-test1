@@ -1,35 +1,54 @@
-import type { LoginRequest } from '@/types/auth'
+import { axiosMeduverse } from '../axios'
+import type { LoginRequest, LoginResponse } from '@/types/auth'
 
 /**
- * Login user with username and password (local validation)
+ * Login user with username and password
  * @param credentials - Username and password
- * @returns Promise with mock access token
- * @throws Error with validation message
+ * @returns Promise with access token
+ * @throws Error with message from API
  */
 export async function login(credentials: LoginRequest): Promise<string> {
-  // Simulate async operation
-  await new Promise(resolve => setTimeout(resolve, 500))
+  try {
+    const response = await axiosMeduverse.post<LoginResponse>(
+      '/auth/login',
+      credentials
+    )
 
-  // Validate against environment variables
-  const validUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME || process.env.ADMIN_USERNAME
-  const validPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD
+    // Extract access token from response
+    const accessToken = response.data.accessToken
 
-  if (credentials.username !== validUsername || credentials.password !== validPassword) {
-    throw new Error('Invalid username or password')
+    if (!accessToken) {
+      throw new Error('No access token received from server')
+    }
+
+    return accessToken
+  } catch (error: any) {
+    // Extract error message from API response
+    const errorMessage =
+      error?.response?.data?.message ||
+      error?.response?.data?.title ||
+      error?.message ||
+      'Login failed. Please try again.'
+
+    throw new Error(errorMessage)
   }
-
-  // Generate a mock token
-  const mockToken = `mock-token-${Date.now()}-${credentials.username}`
-
-  return mockToken
 }
 
 /**
- * Verify if token is valid (local validation)
- * @param token - Token to verify
+ * Verify if token is valid (optional - can be used for token refresh)
+ * @param token - JWT token to verify
  * @returns Promise<boolean>
  */
 export async function verifyToken(token: string): Promise<boolean> {
-  // Simple check: token should start with 'mock-token-'
-  return token.startsWith('mock-token-')
+  try {
+    // This endpoint may not exist yet - placeholder for future
+    const response = await axiosMeduverse.get('/auth/verify', {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    })
+    return response.status === 200
+  } catch (error) {
+    return false
+  }
 }
