@@ -1,5 +1,7 @@
 import axios, { AxiosInstance } from 'axios'
 import { getRandomEquipmentSet } from '@/config/equipment'
+import fs from 'fs'
+import path from 'path'
 
 interface UserData {
   id?: string
@@ -237,6 +239,51 @@ export class MigrationService {
     }
   }
 
+  private writeResultsToFile(
+    students: UserData[],
+    teachers: UserData[],
+    classes: UserData[],
+    listUserError: UserData[],
+    listClassError: UserData[]
+  ): string {
+    try {
+      // Create 'output data' folder if it doesn't exist
+      const outputDir = path.join(process.cwd(), 'output data')
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true })
+      }
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const filename = `migration-results-${timestamp}.json`
+      const filepath = path.join(outputDir, filename)
+
+      const fileContent = {
+        migrationTimestamp: new Date().toISOString(),
+        summary: {
+          totalStudents: students.length,
+          totalTeachers: teachers.length,
+          totalClasses: classes.length,
+          successfulUsers: students.length + teachers.length - listUserError.length,
+          failedUsers: listUserError.length,
+          failedClasses: listClassError.length
+        },
+        students: students,
+        teachers: teachers,
+        classes: classes,
+        errors: {
+          failedUsers: listUserError,
+          failedClasses: listClassError
+        }
+      }
+
+      fs.writeFileSync(filepath, JSON.stringify(fileContent, null, 2), 'utf-8')
+      return filepath
+    } catch (error) {
+      console.error('Failed to write results to file:', error)
+      return ''
+    }
+  }
+
   private async processUser(user: UserData, listUserError: UserData[]): Promise<void> {
     // Check existing usernames
     const existingUsernames = await this.getExistingUsernames(user.username)
@@ -425,6 +472,35 @@ export class MigrationService {
     console.log(`${getTimestamp()} Success: ${students.length + teachers.length - listUserError.length} users`)
     console.log(`${getTimestamp()} Failed: ${listUserError.length} users`)
     console.log(`${getTimestamp()} Class errors: ${listClassError.length}`)
+
+    // Log JSON data for students
+    console.log(`\n${getTimestamp()} === STUDENTS JSON DATA ===`)
+    console.log(JSON.stringify(students, null, 2))
+
+    // Log JSON data for teachers
+    console.log(`\n${getTimestamp()} === TEACHERS JSON DATA ===`)
+    console.log(JSON.stringify(teachers, null, 2))
+
+    // Log JSON data for classes
+    console.log(`\n${getTimestamp()} === CLASSES JSON DATA ===`)
+    console.log(JSON.stringify(classes, null, 2))
+
+    // Log JSON data for errors
+    if (listUserError.length > 0) {
+      console.log(`\n${getTimestamp()} === USER ERRORS JSON DATA ===`)
+      console.log(JSON.stringify(listUserError, null, 2))
+    }
+
+    if (listClassError.length > 0) {
+      console.log(`\n${getTimestamp()} === CLASS ERRORS JSON DATA ===`)
+      console.log(JSON.stringify(listClassError, null, 2))
+    }
+
+    // Write results to file
+    const filepath = this.writeResultsToFile(students, teachers, classes, listUserError, listClassError)
+    if (filepath) {
+      console.log(`\n${getTimestamp()} Results saved to file: ${filepath}`)
+    }
 
     return {
       listDataStudent: students,

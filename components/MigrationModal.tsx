@@ -56,34 +56,32 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
       !result.ListUserError.find((e: any) => e.username === t.username)
     )
 
-    const csvContent = [
-      '=== STUDENTS ===',
-      'Id,Actual Username,Password,Actual Display Name,Class,Phone',
-      ...successStudents.map((s: any) =>
-        `${s.id || ''},${s.actualUserName || s.username},${s.password},${s.actualDisplayName || s.displayName},${s.classses},${s.phoneNumber || ''}`
-      ),
-      '',
-      '=== TEACHERS ===',
-      'Id,Actual Username,Password,Actual Display Name,Class',
-      ...successTeachers.map((t: any) =>
-        `${t.id || ''},${t.actualUserName || t.username},${t.password},${t.actualDisplayName || t.displayName},${t.classses}`
-      )
-    ].join('\n')
+    const jsonData = {
+      students: successStudents,
+      teachers: successTeachers,
+      summary: {
+        totalStudents: successStudents.length,
+        totalTeachers: successTeachers.length,
+        totalUsers: successStudents.length + successTeachers.length
+      }
+    }
 
-    copyToClipboard(csvContent)
+    copyToClipboard(JSON.stringify(jsonData, null, 2))
   }
 
   const copyErrorData = () => {
     if (!result || !result.ListUserError) return
 
-    const csvContent = [
-      'Username,Display Name,Password,Class,Phone,Error Reason',
-      ...result.ListUserError.map((u: any) =>
-        `${u.username},${u.displayName},${u.password},${u.classses},${u.phoneNumber || ''},${u.reason || ''}`
-      )
-    ].join('\n')
+    const jsonData = {
+      failedUsers: result.ListUserError,
+      failedClasses: result.ListClassError || [],
+      summary: {
+        totalFailedUsers: result.ListUserError.length,
+        totalFailedClasses: result.ListClassError?.length || 0
+      }
+    }
 
-    copyToClipboard(csvContent)
+    copyToClipboard(JSON.stringify(jsonData, null, 2))
   }
 
   if (!isOpen) return null
