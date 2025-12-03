@@ -23,58 +23,14 @@ export const FEATURES: Feature[] = [
     category: 'data'
   },
   {
-    id: 'data-export',
-    title: 'Data Export',
-    description: 'Export user data, reports, and analytics to Excel, CSV, or JSON formats with customizable filters.',
-    icon: '📊',
-    color: 'green',
-    gradient: 'from-green-500 to-emerald-600',
-    route: '/features/data-export',
-    status: 'coming-soon',
-    category: 'data'
-  },
-  {
-    id: 'user-reports',
-    title: 'User Reports',
-    description: 'Generate comprehensive reports on user activity, engagement, and performance metrics.',
-    icon: '📈',
-    color: 'purple',
-    gradient: 'from-purple-500 to-violet-600',
-    route: '/features/user-reports',
-    status: 'coming-soon',
-    category: 'reports'
-  },
-  {
-    id: 'class-management',
-    title: 'Class Management',
-    description: 'Manage classes, assign teachers, and organize students with intuitive drag-and-drop interface.',
-    icon: '🏫',
-    color: 'orange',
-    gradient: 'from-orange-500 to-red-600',
-    route: '/features/class-management',
-    status: 'coming-soon',
-    category: 'admin'
-  },
-  {
-    id: 'analytics-dashboard',
-    title: 'Analytics Dashboard',
-    description: 'Real-time analytics and insights with interactive charts and customizable widgets.',
-    icon: '📉',
-    color: 'cyan',
-    gradient: 'from-cyan-500 to-blue-600',
-    route: '/features/analytics-dashboard',
-    status: 'coming-soon',
-    category: 'analytics'
-  },
-  {
-    id: 'bulk-operations',
-    title: 'Bulk Operations',
-    description: 'Perform bulk actions on users, classes, and data with powerful batch processing.',
-    icon: '⚡',
-    color: 'yellow',
-    gradient: 'from-yellow-500 to-orange-600',
-    route: '/features/bulk-operations',
-    status: 'coming-soon',
+    id: 'batch-send-package',
+    title: 'Batch Send Package',
+    description: 'Send packages to multiple users in batch. Search by username or use direct user IDs with progress tracking and retry mechanism.',
+    icon: '📦',
+    color: 'indigo',
+    gradient: 'from-indigo-500 to-purple-600',
+    route: '/features/batch-send-package',
+    status: 'active',
     category: 'tools'
   }
 ]
