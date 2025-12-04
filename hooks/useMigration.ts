@@ -19,6 +19,9 @@ export const useMigration = () => {
   const [activeTab, setActiveTab] = useState<TabType>('upload')
   const [result, setResult] = useState<MigrationResult | null>(null)
   const [notification, setNotification] = useState<NotificationState | null>(null)
+  const [existingClasses, setExistingClasses] = useState<string[]>([])
+  const [isCheckingClasses, setIsCheckingClasses] = useState(false)
+  const [includeAdminTeacher, setIncludeAdminTeacher] = useState(false)
 
   const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setNotification({ message, type })
@@ -36,6 +39,7 @@ export const useMigration = () => {
     setFailedUsers([])
     setResult(null)
     setActiveTab('upload')
+    setIncludeAdminTeacher(false)
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -44,6 +48,26 @@ export const useMigration = () => {
       setStudents([])
       setTeachers([])
       setErrors([])
+    }
+  }
+
+  const checkExistingClasses = async (studentList: StudentData[], prefix: string) => {
+    setIsCheckingClasses(true)
+    try {
+      const uniqueClasses = Array.from(new Set(studentList.map(s => s.className)))
+
+      const response = await axios.post('/api/check-existing-classes', {
+        schoolPrefix: prefix,
+        classNames: uniqueClasses
+      })
+
+      if (response?.data?.existingClasses) {
+        setExistingClasses(response.data.existingClasses)
+      }
+    } catch (error) {
+      console.error('Failed to check existing classes:', error)
+    } finally {
+      setIsCheckingClasses(false)
     }
   }
 
@@ -88,7 +112,13 @@ export const useMigration = () => {
             return
           }
 
-          const processed = processExcelData(excelRows, schoolPrefix.trim().toLowerCase())
+          const processed = processExcelData(
+            excelRows,
+            schoolPrefix.trim().toLowerCase(),
+            new Set(),
+            new Set(),
+            includeAdminTeacher
+          )
 
           setStudents(processed.students)
           setTeachers(processed.teachers)
@@ -97,6 +127,9 @@ export const useMigration = () => {
           if (processed.students.length > 0) {
             setActiveTab('preview')
             showNotification(`Found ${processed.students.length} student(s) and ${processed.teachers.length} teacher(s)`, 'success')
+
+            // Check existing classes
+            checkExistingClasses(processed.students, schoolPrefix.trim().toLowerCase())
           }
 
           setIsProcessing(false)
@@ -220,6 +253,9 @@ export const useMigration = () => {
     activeTab,
     result,
     notification,
+    existingClasses,
+    isCheckingClasses,
+    includeAdminTeacher,
     // Actions
     setSchoolPrefix,
     setActiveTab,
@@ -229,5 +265,6 @@ export const useMigration = () => {
     handleFileChange,
     handleProcessFile,
     handleCreateUsers,
+    setIncludeAdminTeacher,
   }
 }

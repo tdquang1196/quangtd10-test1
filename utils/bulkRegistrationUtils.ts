@@ -188,7 +188,8 @@ export function processExcelData(
   excelRows: Array<{ fullName: string; grade: string; phoneNumber: string }>,
   schoolPrefix: string,
   existingUsernames: Set<string> = new Set(),
-  existingDisplayNames: Set<string> = new Set()
+  existingDisplayNames: Set<string> = new Set(),
+  includeAdminTeacher: boolean = false
 ): ProcessedData {
   const students: StudentData[] = [];
   const teachers: Map<string, TeacherData> = new Map();
@@ -272,23 +273,25 @@ export function processExcelData(
     }
   });
 
-  // Create general school teacher account (schoolPrefix + "gv")
-  const generalTeacherKey = '__SCHOOL__'; // Special key for general teacher
-  const generalTeacherAccount = generateTeacherAccount(schoolPrefix);
-  const generalTeacherUsername = resolveUsernameConflict(
-    generalTeacherAccount.username,
-    localUsernames
-  );
+  // Create general school teacher account (schoolPrefix + "gv") only if includeAdminTeacher is true
+  if (includeAdminTeacher) {
+    const generalTeacherKey = '__SCHOOL__'; // Special key for general teacher
+    const generalTeacherAccount = generateTeacherAccount(schoolPrefix);
+    const generalTeacherUsername = resolveUsernameConflict(
+      generalTeacherAccount.username,
+      localUsernames
+    );
 
-  localUsernames.add(generalTeacherUsername.toLowerCase());
+    localUsernames.add(generalTeacherUsername.toLowerCase());
 
-  teachers.set(generalTeacherKey, {
-    ...generalTeacherAccount,
-    username: generalTeacherUsername,
-    displayName: generalTeacherUsername,
-    grade: '', // No specific grade for general teacher
-    className: schoolPrefix.toUpperCase() // Class name is the school prefix itself (uppercase)
-  });
+    teachers.set(generalTeacherKey, {
+      ...generalTeacherAccount,
+      username: generalTeacherUsername,
+      displayName: generalTeacherUsername,
+      grade: '', // No specific grade for general teacher
+      className: schoolPrefix.toUpperCase() // Class name is the school prefix itself (uppercase)
+    });
+  }
 
   return {
     students,

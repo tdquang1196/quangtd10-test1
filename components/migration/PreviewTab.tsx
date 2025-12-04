@@ -7,10 +7,15 @@ interface PreviewTabProps {
   isCreating: boolean
   progressMessage: string
   totalCount: number
+  existingClasses: string[]
+  isCheckingClasses: boolean
 }
 
-export default function PreviewTab({ students, teachers, isCreating, progressMessage, totalCount }: PreviewTabProps) {
+export default function PreviewTab({ students, teachers, isCreating, progressMessage, totalCount, existingClasses, isCheckingClasses }: PreviewTabProps) {
   const uniqueClasses = Array.from(new Set(students.map(s => s.className)))
+  const existingClassSet = new Set(existingClasses)
+  const newClassesCount = uniqueClasses.filter(c => !existingClassSet.has(c)).length
+  const existingClassesCount = uniqueClasses.filter(c => existingClassSet.has(c)).length
 
   return (
     <div className="space-y-6">
@@ -30,8 +35,24 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
         </Card>
         <Card className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-200">
           <CardContent className="p-5 text-center">
-            <div className="text-3xl font-bold text-green-700 mb-1">{uniqueClasses.length}</div>
-            <div className="text-sm font-semibold text-green-600">Classes</div>
+            {isCheckingClasses ? (
+              <>
+                <div className="text-2xl font-bold text-green-700 mb-1">
+                  <div className="inline-block w-6 h-6 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+                <div className="text-xs font-semibold text-green-600">Checking...</div>
+              </>
+            ) : (
+              <>
+                <div className="text-3xl font-bold text-green-700 mb-1">{uniqueClasses.length}</div>
+                <div className="text-sm font-semibold text-green-600">Classes</div>
+                {existingClasses.length > 0 && (
+                  <div className="text-xs text-green-600 mt-1">
+                    {newClassesCount} new, {existingClassesCount} existing
+                  </div>
+                )}
+              </>
+            )}
           </CardContent>
         </Card>
         <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-2 border-orange-200">
@@ -60,6 +81,31 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
         </Card>
       )}
 
+      {/* Info Box - Existing Classes */}
+      {existingClasses.length > 0 && !isCheckingClasses && (
+        <Card className="bg-gradient-to-br from-yellow-50 to-orange-50 border-2 border-yellow-200">
+          <CardContent className="p-5">
+            <div className="flex gap-3">
+              <div className="flex-shrink-0">
+                <svg className="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-yellow-900 mb-2">Existing Classes Detected</h3>
+                <p className="text-sm text-yellow-800 mb-2">
+                  {existingClassesCount} of {uniqueClasses.length} classes already exist in the system:
+                </p>
+                <ul className="text-sm text-yellow-700 space-y-1">
+                  <li>• <strong>Existing classes:</strong> Students will be added to the existing class (no new teachers created)</li>
+                  <li>• <strong>New classes:</strong> Class and teacher accounts will be created</li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Classes Table */}
       <Card>
         <CardHeader>
@@ -75,6 +121,7 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
             <TableHeader>
               <TableRow>
                 <TableHead>Class Name</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead>Teacher</TableHead>
                 <TableHead>Students</TableHead>
               </TableRow>
@@ -83,11 +130,25 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
               {uniqueClasses.map((className) => {
                 const teacher = teachers.find(t => t.className === className)
                 const studentCount = students.filter(s => s.className === className).length
+                const isExisting = existingClassSet.has(className)
                 return (
                   <TableRow key={className}>
                     <TableCell className="font-semibold">{className}</TableCell>
                     <TableCell>
-                      <Badge variant="info">{teacher?.username || '-'}</Badge>
+                      {isCheckingClasses ? (
+                        <Badge variant="default">Checking...</Badge>
+                      ) : isExisting ? (
+                        <Badge variant="warning">Exists</Badge>
+                      ) : (
+                        <Badge variant="success">New</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {isExisting ? (
+                        <Badge variant="default" className="opacity-50">Skipped</Badge>
+                      ) : (
+                        <Badge variant="info">{teacher?.username || '-'}</Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant="success">{studentCount}</Badge>

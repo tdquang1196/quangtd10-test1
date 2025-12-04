@@ -88,7 +88,7 @@ export class MigrationService {
     try {
       // Search for groups matching the school prefix
       const response = await this.adminClient!.get<GetUserGroupsResult>(
-        `/manage/User/Group?Text=${encodeURIComponent(schoolPrefix.toUpperCase())}`
+        `/manage/User/Group?pageSize=1000&Text=${encodeURIComponent(schoolPrefix.toUpperCase())}`
       )
 
       const classMap = new Map<string, string>()
@@ -434,7 +434,15 @@ export class MigrationService {
     const listClassError: UserData[] = []
 
     // Filter teachers - only keep teachers for NEW classes (classes that don't exist yet)
+    // BUT always keep the admin teacher (the one with className === schoolPrefix.toUpperCase())
     const teachersToCreate = teachers.filter(teacher => {
+      // Check if this is the admin teacher (general teacher for all classes)
+      const isAdminTeacher = teacher.classses.toUpperCase() === schoolPrefix.toUpperCase()
+
+      if (isAdminTeacher) {
+        return true // Always include admin teacher
+      }
+
       // Check if teacher's class already exists
       const classExists = existingClasses.has(teacher.classses.toLowerCase())
       if (classExists) {
@@ -502,12 +510,21 @@ export class MigrationService {
           const groupId = createGroupResponse.data.userGroup.id
 
           // Find teachers for this NEW class (only from teachersToCreate)
+          // This includes:
+          // 1. Class-specific teacher (e.g., hytklttgv1a for class HYTKLTT_1A_2025)
+          // 2. Admin teacher if exists (e.g., hytklttgv for all classes)
           const classTeachers = teachersToCreate
-            .filter(t =>
-              (t.classses.toLowerCase() === classItem.username.toLowerCase() ||
-                classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())) &&
-              t.id
-            )
+            .filter(t => {
+              if (!t.id) return false
+
+              // Admin teacher (className is schoolPrefix) - add to ALL classes
+              const isAdminTeacher = t.classses.toUpperCase() === schoolPrefix.toUpperCase()
+              if (isAdminTeacher) return true
+
+              // Class-specific teacher
+              return t.classses.toLowerCase() === classItem.username.toLowerCase() ||
+                     classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())
+            })
             .map(t => t.id)
 
           await this.adminClient!.post('/manage/classes', {

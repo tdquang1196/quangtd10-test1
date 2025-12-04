@@ -4,7 +4,9 @@ interface UploadTabProps {
   file: File | null
   schoolPrefix: string
   errors: Array<{ row: number; message: string }>
+  includeAdminTeacher: boolean
   setSchoolPrefix: (prefix: string) => void
+  setIncludeAdminTeacher: (include: boolean) => void
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
 }
 
@@ -12,7 +14,9 @@ export default function UploadTab({
   file,
   schoolPrefix,
   errors,
+  includeAdminTeacher,
   setSchoolPrefix,
+  setIncludeAdminTeacher,
   handleFileChange
 }: UploadTabProps) {
   return (
@@ -65,6 +69,25 @@ export default function UploadTab({
             onChange={(e) => setSchoolPrefix(e.target.value)}
             helperText="This prefix will be used to generate unique usernames"
           />
+
+          {/* Admin Teacher Checkbox */}
+          <div className="flex items-start gap-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+            <input
+              type="checkbox"
+              id="admin-teacher-checkbox"
+              checked={includeAdminTeacher}
+              onChange={(e) => setIncludeAdminTeacher(e.target.checked)}
+              className="mt-1 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500 cursor-pointer"
+            />
+            <label htmlFor="admin-teacher-checkbox" className="flex-1 cursor-pointer">
+              <div className="text-sm font-semibold text-purple-900 mb-1">
+                Create Admin Teacher Account
+              </div>
+              <div className="text-xs text-purple-700">
+                Create a general teacher account (e.g., <span className="font-mono font-semibold">hytklttgv</span>) that will be added to all classes
+              </div>
+            </label>
+          </div>
 
           <div>
             <label className="block mb-2 text-sm font-semibold text-gray-700">
