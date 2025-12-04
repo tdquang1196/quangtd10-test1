@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { PACKAGE_SOURCE_OPTIONS } from '@/constants/package-source'
-import { searchBatchUsers, givePackageToUser } from '@/lib/api/users'
+import { searchBatchUsers, givePackageToUser, getSubscriptions } from '@/lib/api/users'
 
 interface BatchPackageModalProps {
   isOpen: boolean
@@ -16,7 +16,7 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
   const [notFoundUsers, setNotFoundUsers] = useState<string[]>([])
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize] = useState(10)
-  const [packageId, setPackageId] = useState('')
+  const [subscriptionId, setSubscriptionId] = useState('')
   const [description, setDescription] = useState('')
   const [requester, setRequester] = useState('')
   const [source, setSource] = useState('4')
@@ -26,6 +26,8 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
   const [failedUsers, setFailedUsers] = useState<any[]>([])
   const [successCount, setSuccessCount] = useState(0)
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'warning' | 'info' } | null>(null)
+  const [subscriptions, setSubscriptions] = useState<Array<{ id: string; title: string }>>([])
+  const [isLoadingSubscriptions, setIsLoadingSubscriptions] = useState(false)
 
   // Client-side pagination
   const totalPages = Math.ceil(foundUsers.length / pageSize)
@@ -33,6 +35,33 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
     (currentPage - 1) * pageSize,
     currentPage * pageSize
   )
+
+  // Fetch subscriptions when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchSubscriptions()
+    }
+  }, [isOpen])
+
+  const fetchSubscriptions = async () => {
+    setIsLoadingSubscriptions(true)
+    try {
+      const response = await getSubscriptions()
+      if (response?.data?.subcriptions) {
+        setSubscriptions(
+          response.data.subcriptions.map((sub: any) => ({
+            id: sub.id,
+            title: sub.title
+          }))
+        )
+      }
+    } catch (error) {
+      console.error('Failed to fetch subscriptions:', error)
+      showNotification('Failed to load subscriptions', 'error')
+    } finally {
+      setIsLoadingSubscriptions(false)
+    }
+  }
 
   const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setNotification({ message, type })
@@ -45,7 +74,7 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
     setFoundUsers([])
     setNotFoundUsers([])
     setCurrentPage(1)
-    setPackageId('')
+    setSubscriptionId('')
     setDescription('')
     setRequester('')
     setSource('4')
@@ -137,8 +166,8 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
   const handleSendPackage = async (usersToSend?: any[]) => {
     const targetUsers = usersToSend || foundUsers
 
-    if (!packageId) {
-      showNotification('Please enter a package ID', 'error')
+    if (!subscriptionId) {
+      showNotification('Please select a subscription package', 'error')
       return
     }
 
@@ -174,7 +203,7 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
         const results = await Promise.allSettled(
           batch.map(async (user) => {
             const payload = {
-              packageId: packageId,
+              subscriptionId: subscriptionId,
               userId: user.userId,
               description: description,
               source: parseInt(source),
@@ -421,15 +450,30 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-900 mb-1">
-                      Package ID <span className="text-red-600">*</span>
+                      Package <span className="text-red-600">*</span>
                     </label>
-                    <input
-                      type="text"
-                      value={packageId}
-                      onChange={(e) => setPackageId(e.target.value)}
-                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none"
-                      placeholder="Enter package ID"
-                    />
+                    {isLoadingSubscriptions ? (
+                      <div className="w-full px-4 py-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-500">
+                        Loading subscriptions...
+                      </div>
+                    ) : subscriptions.length === 0 ? (
+                      <div className="w-full px-4 py-3 border border-red-200 rounded-lg bg-red-50 text-red-600 text-sm">
+                        No subscriptions available. Please contact administrator.
+                      </div>
+                    ) : (
+                      <select
+                        value={subscriptionId}
+                        onChange={(e) => setSubscriptionId(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none bg-white"
+                      >
+                        <option value="">Select a subscription package</option>
+                        {subscriptions.map((sub) => (
+                          <option key={sub.id} value={sub.id}>
+                            {sub.title}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   <div>
@@ -552,7 +596,7 @@ export function BatchPackageModal({ isOpen, onClose }: BatchPackageModalProps) {
                   </button>
                   <button
                     onClick={() => handleSendPackage()}
-                    disabled={!packageId || !description || !requester || isSending}
+                    disabled={!subscriptionId || !description || !requester || isSending}
                     className="px-6 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     {isSending ? 'Sending...' : 'Send to All Users'}

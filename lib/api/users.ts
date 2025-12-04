@@ -6,12 +6,17 @@ export async function searchBatchUsers(data: { listUserNames: string[] }) {
 }
 
 export async function givePackageToUser(payload: {
-  packageId: string
+  subscriptionId: string
   userId: string
   description: string
   source: number
   requester: string
 }) {
   const response = await axiosMeduverse.post(`/manage/Subscription/Admin-Give`, payload)
+  return response
+}
+
+export async function getSubscriptions() {
+  const response = await axiosMeduverse.get(`/manage/subcriptions`)
   return response
 }
