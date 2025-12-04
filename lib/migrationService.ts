@@ -191,7 +191,6 @@ export class MigrationService {
     let idx = 0
     let isUpdateToUserName = false
     let isSubstringDisplayName = false
-    let isSubstringUserName = false
 
     while (true) {
       try {
@@ -214,10 +213,6 @@ export class MigrationService {
           } else if (!isUpdateToUserName) {
             displayName = actualUsername
             isUpdateToUserName = true
-            idx = 0
-          } else if (isUpdateToUserName && !isSubstringUserName) {
-            displayName = actualUsername.substring(0, Math.min(actualUsername.length, MAX_LENGTH_DISPLAY_NAME))
-            isSubstringUserName = true
             idx = 0
           } else {
             return loginDisplayName
@@ -359,7 +354,6 @@ export class MigrationService {
     let baseDisplayName = user.displayName
     let isUpdateToUserName = false
     let isSubstringDisplayName = false
-    let isSubstringUserName = false
 
     while (true) {
       const tryDisplayName = tempDisplayIdx === 0 ? baseDisplayName : `${baseDisplayName}${tempDisplayIdx}`
@@ -376,10 +370,6 @@ export class MigrationService {
         } else if (!isUpdateToUserName) {
           baseDisplayName = user.actualUserName
           isUpdateToUserName = true
-          tempDisplayIdx = 0
-        } else if (isUpdateToUserName && !isSubstringUserName) {
-          baseDisplayName = user.actualUserName.substring(0, Math.min(user.actualUserName.length, MAX_LENGTH_DISPLAY_NAME))
-          isSubstringUserName = true
           tempDisplayIdx = 0
         } else {
           baseDisplayName = loginResult.displayName
@@ -399,19 +389,22 @@ export class MigrationService {
       loginResult.displayName
     )
 
-    if (!validatedDisplayName) {
-      user.reason = 'Display name validation failed'
-      listUserError.push({ ...user })
-      return
+    // Use validated display name or fallback to login display name
+    user.actualDisplayName = validatedDisplayName || loginResult.displayName
+
+    // Set equipment and profile (continue even if this fails)
+    try {
+      await this.setEquipmentAndProfile(userClient, user.actualDisplayName)
+    } catch (error) {
+      console.error('Equipment setup failed, continuing with phone number update:', error)
     }
 
-    user.actualDisplayName = validatedDisplayName
-
-    // Set equipment and profile
-    await this.setEquipmentAndProfile(userClient, user.actualDisplayName)
-
-    // Update phone number
-    await this.updatePhoneNumber(userClient, user.phoneNumber)
+    // Always update phone number (even if display name validation or equipment failed)
+    try {
+      await this.updatePhoneNumber(userClient, user.phoneNumber)
+    } catch (error) {
+      console.error('Phone number update failed:', error)
+    }
   }
 
   public async migrate(
