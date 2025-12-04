@@ -1,3 +1,5 @@
+import { useState, useEffect, useRef } from 'react'
+import axios from 'axios'
 import { StudentData, TeacherData } from '@/types'
 import { Card, CardHeader, CardTitle, CardContent, Badge, Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui'
 
@@ -9,13 +11,217 @@ interface PreviewTabProps {
   totalCount: number
   existingClasses: string[]
   isCheckingClasses: boolean
+  schoolPrefix: string
 }
 
-export default function PreviewTab({ students, teachers, isCreating, progressMessage, totalCount, existingClasses, isCheckingClasses }: PreviewTabProps) {
+export default function PreviewTab({ students, teachers, isCreating, progressMessage, totalCount, existingClasses: initialExistingClasses, isCheckingClasses: initialCheckingState, schoolPrefix }: PreviewTabProps) {
+  const [existingClasses, setExistingClasses] = useState<string[]>(initialExistingClasses)
+  const [isCheckingClasses, setIsCheckingClasses] = useState(initialCheckingState)
+  const [existingAdminTeacher, setExistingAdminTeacher] = useState<{ username: string; displayName: string } | null>(null)
   const uniqueClasses = Array.from(new Set(students.map(s => s.className)))
   const existingClassSet = new Set(existingClasses)
   const newClassesCount = uniqueClasses.filter(c => !existingClassSet.has(c)).length
   const existingClassesCount = uniqueClasses.filter(c => existingClassSet.has(c)).length
+
+  // Track if check is in progress to prevent duplicate calls
+  const isCheckingRef = useRef(false)
+  const hasFetchedRef = useRef(false)
+
+  // Check if admin teacher checkbox is unchecked (no admin teacher in the list)
+  const hasAdminTeacherInList = teachers.some(t => t.className && !t.className.includes('_'))
+  const shouldFetchAdminTeacher = !hasAdminTeacherInList
+
+  // Check existing classes when component mounts or when classes change
+  useEffect(() => {
+    let isCancelled = false
+
+    // Skip if we've already fetched data for this component instance
+    if (hasFetchedRef.current) {
+      console.log('PreviewTab: Skipping - already fetched for this instance')
+      return
+    }
+
+    // Skip if already checking
+    if (isCheckingRef.current) {
+      console.log('PreviewTab: Skipping - check already in progress')
+      return
+    }
+
+    const checkExistingClasses = async () => {
+      console.log('PreviewTab: Checking classes...', {
+        uniqueClassesLength: uniqueClasses.length,
+        schoolPrefix,
+        uniqueClasses
+      })
+
+      if (uniqueClasses.length === 0 || !schoolPrefix) {
+        console.log('PreviewTab: Skipping check - no classes or prefix')
+        return
+      }
+
+      if (isCancelled) return
+
+      // Mark as checking
+      isCheckingRef.current = true
+      setIsCheckingClasses(true)
+      try {
+        // Get configuration
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL
+
+        console.log('PreviewTab: API Config', { apiUrl })
+
+        if (!apiUrl) {
+          console.error('PreviewTab: Missing API URL')
+          setIsCheckingClasses(false)
+          return
+        }
+
+        // Try to get existing token from localStorage
+        let token = localStorage.getItem('auth_token')
+        console.log('PreviewTab: Using token from localStorage', { hasToken: !!token })
+
+        // Helper function to fetch groups
+        const fetchGroups = async (authToken: string) => {
+          const groupsResponse = await axios.get(
+            `${apiUrl}/manage/User/Group?pageSize=1000&Text=${encodeURIComponent(schoolPrefix.toUpperCase())}`,
+            {
+              headers: {
+                Authorization: `Bearer ${authToken}`
+              }
+            }
+          )
+          return groupsResponse
+        }
+
+        // Try to fetch with existing token
+        let groupsResponse
+        try {
+          if (token) {
+            console.log('PreviewTab: Fetching groups with existing token...')
+            groupsResponse = await fetchGroups(token)
+          } else {
+            throw new Error('No token available')
+          }
+        } catch (error: any) {
+          // If 401 or no token, login and retry
+          if (error.response?.status === 401 || !token) {
+            console.log('PreviewTab: Token expired or missing, logging in...')
+
+            // Remove invalid token
+            localStorage.removeItem('auth_token')
+
+            // Get admin credentials
+            const adminUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME
+            const adminPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD
+
+            if (!adminUsername || !adminPassword) {
+              console.error('PreviewTab: Missing admin credentials')
+              setIsCheckingClasses(false)
+              return
+            }
+
+            // Login to get new token
+            const loginResponse = await axios.post(`${apiUrl}/auth/login`, {
+              username: adminUsername,
+              password: adminPassword
+            })
+
+            token = loginResponse.data.accessToken
+            console.log('PreviewTab: Login successful, got new token')
+
+            // Store new token
+            localStorage.setItem('auth_token', token)
+
+            // Retry fetching groups with new token
+            groupsResponse = await fetchGroups(token)
+          } else {
+            throw error
+          }
+        }
+
+        if (isCancelled) return
+
+        console.log('PreviewTab: Groups fetched', { count: groupsResponse.data.groups.length })
+
+        // Create a map of existing class names
+        const existingClassNames = new Set(
+          groupsResponse.data.groups.map((g: any) => g.name.toLowerCase())
+        )
+
+        // Filter classes that exist
+        const existing = uniqueClasses.filter(className =>
+          existingClassNames.has(className.toLowerCase())
+        )
+
+        console.log('PreviewTab: Existing classes found', existing)
+        if (!isCancelled) {
+          setExistingClasses(existing)
+        }
+
+        // If admin teacher is not in the list, fetch existing admin teacher from backend
+        if (shouldFetchAdminTeacher && schoolPrefix) {
+          console.log('PreviewTab: Fetching existing admin teacher...')
+          try {
+            const adminTeacherUsername = `${schoolPrefix.toLowerCase()}gv`
+            const usersResponse = await axios.get(
+              `${apiUrl}/manage/Users?pageIndex=1&pageSize=100&filter=${adminTeacherUsername}`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`
+                }
+              }
+            )
+
+            const adminTeacher = usersResponse.data.users.find((u: any) =>
+              u.username.toLowerCase() === adminTeacherUsername
+            )
+
+            if (adminTeacher && !isCancelled) {
+              console.log('PreviewTab: Found existing admin teacher', adminTeacher)
+              setExistingAdminTeacher({
+                username: adminTeacher.username,
+                displayName: adminTeacher.displayName
+              })
+            } else {
+              console.log('PreviewTab: No existing admin teacher found')
+            }
+          } catch (error) {
+            console.error('PreviewTab: Failed to fetch admin teacher:', error)
+          }
+        }
+
+        if (!isCancelled) {
+          hasFetchedRef.current = true
+        }
+      } catch (error) {
+        console.error('PreviewTab: Failed to check existing classes:', error)
+      } finally {
+        if (!isCancelled) {
+          setIsCheckingClasses(false)
+          isCheckingRef.current = false
+        }
+      }
+    }
+
+    checkExistingClasses()
+
+    // Cleanup function to prevent setting state on unmounted component
+    return () => {
+      isCancelled = true
+      isCheckingRef.current = false
+    }
+  }, [uniqueClasses.length, schoolPrefix])
+
+  // Filter teachers: only show teachers for NEW classes (classes that don't exist)
+  // Also keep the admin teacher (general teacher for all classes)
+  const teachersToAdd = teachers.filter(teacher => {
+    // Check if this is the admin teacher (className is the school prefix without grade/class)
+    const isAdminTeacher = teacher.className && !teacher.className.includes('_')
+    if (isAdminTeacher) return true
+
+    // Only include teachers for NEW classes
+    return !existingClassSet.has(teacher.className)
+  })
 
   return (
     <div className="space-y-6">
@@ -29,8 +235,13 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
         </Card>
         <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-200">
           <CardContent className="p-5 text-center">
-            <div className="text-3xl font-bold text-purple-700 mb-1">{teachers.length}</div>
+            <div className="text-3xl font-bold text-purple-700 mb-1">{teachersToAdd.length}</div>
             <div className="text-sm font-semibold text-purple-600">Teachers</div>
+            {teachers.length > teachersToAdd.length && (
+              <div className="text-xs text-purple-600 mt-1">
+                {teachers.length - teachersToAdd.length} skipped
+              </div>
+            )}
           </CardContent>
         </Card>
         <Card className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-200">
@@ -57,8 +268,11 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
         </Card>
         <Card className="bg-gradient-to-br from-orange-50 to-orange-100 border-2 border-orange-200">
           <CardContent className="p-5 text-center">
-            <div className="text-3xl font-bold text-orange-700 mb-1">{students.length + teachers.length}</div>
+            <div className="text-3xl font-bold text-orange-700 mb-1">{students.length + teachersToAdd.length}</div>
             <div className="text-sm font-semibold text-orange-600">Total Users</div>
+            <div className="text-xs text-orange-600 mt-1">
+              to be created
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -94,12 +308,40 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
               <div className="flex-1">
                 <h3 className="font-bold text-yellow-900 mb-2">Existing Classes Detected</h3>
                 <p className="text-sm text-yellow-800 mb-2">
-                  {existingClassesCount} of {uniqueClasses.length} classes already exist in the system:
+                  {existingClassesCount} of {uniqueClasses.length} classes already exist. Here's what will happen:
                 </p>
                 <ul className="text-sm text-yellow-700 space-y-1">
-                  <li>• <strong>Existing classes:</strong> Students will be added to the existing class (no new teachers created)</li>
-                  <li>• <strong>New classes:</strong> Class and teacher accounts will be created</li>
+                  <li>• <strong>Existing classes ({existingClassesCount}):</strong> Only students added, teachers skipped</li>
+                  <li>• <strong>New classes ({newClassesCount}):</strong> Both students and teachers created</li>
+                  <li>• <strong>Teachers to create:</strong> {teachersToAdd.length} of {teachers.length}</li>
+                  {existingAdminTeacher && (
+                    <li>• <strong>Existing admin teacher:</strong> {existingAdminTeacher.username} will be added to {newClassesCount} new classes</li>
+                  )}
                 </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Info Box - Existing Admin Teacher */}
+      {existingAdminTeacher && shouldFetchAdminTeacher && newClassesCount > 0 && (
+        <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200">
+          <CardContent className="p-5">
+            <div className="flex gap-3">
+              <div className="flex-shrink-0">
+                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-blue-900 mb-2">Existing Admin Teacher Found</h3>
+                <p className="text-sm text-blue-800 mb-2">
+                  Admin teacher <strong>{existingAdminTeacher.username}</strong> ({existingAdminTeacher.displayName}) already exists.
+                </p>
+                <p className="text-sm text-blue-700">
+                  This teacher will be automatically added to all {newClassesCount} new classes.
+                </p>
               </div>
             </div>
           </CardContent>
@@ -161,15 +403,20 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
         </CardContent>
       </Card>
 
-      {/* Teachers Table */}
-      {teachers.length > 0 && (
+      {/* Teachers Table - Only show teachers that will be created */}
+      {teachersToAdd.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
               </svg>
-              Teachers ({teachers.length})
+              Teachers to Create ({teachersToAdd.length})
+              {teachers.length > teachersToAdd.length && (
+                <span className="text-sm font-normal text-gray-500">
+                  ({teachers.length - teachersToAdd.length} skipped for existing classes)
+                </span>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -180,18 +427,29 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                     <TableHead>Username</TableHead>
                     <TableHead>Password</TableHead>
                     <TableHead>Class</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {teachers.map((teacher, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell className="font-mono font-semibold">{teacher.username}</TableCell>
-                      <TableCell className="font-mono text-purple-600">{teacher.password}</TableCell>
-                      <TableCell>
-                        <Badge variant="default">{teacher.className}</Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {teachersToAdd.map((teacher, idx) => {
+                    const isAdminTeacher = teacher.className && !teacher.className.includes('_')
+                    return (
+                      <TableRow key={idx}>
+                        <TableCell className="font-mono font-semibold">{teacher.username}</TableCell>
+                        <TableCell className="font-mono text-purple-600">{teacher.password}</TableCell>
+                        <TableCell>
+                          <Badge variant="default">{teacher.className}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          {isAdminTeacher ? (
+                            <Badge variant="info">Admin Teacher</Badge>
+                          ) : (
+                            <Badge variant="success">New Class</Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
                 </TableBody>
               </Table>
             </div>

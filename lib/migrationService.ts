@@ -24,6 +24,7 @@ interface LoginResult {
 
 interface GetUsersResult {
   users: Array<{
+    userId: string
     username: string
     displayName: string
   }>
@@ -407,6 +408,43 @@ export class MigrationService {
     }
   }
 
+  private async getExistingAdminTeacher(schoolPrefix: string): Promise<{ id: string; username: string; displayName: string } | null> {
+    try {
+      const adminTeacherUsername = `${schoolPrefix.toLowerCase()}gv`
+      console.log(`Searching for existing admin teacher: ${adminTeacherUsername}`)
+
+      const response = await this.adminClient!.get<GetUsersResult>(
+        `/manage/Users?pageIndex=1&pageSize=100&filter=${adminTeacherUsername}`
+      )
+
+      const adminTeacher = response.data.users.find(u =>
+        u.username.toLowerCase() === adminTeacherUsername
+      )
+
+      if (adminTeacher) {
+        console.log(`Found existing admin teacher: ${adminTeacher.username} (${adminTeacher.displayName})`)
+
+        // Use userId from the response
+        if (adminTeacher.userId) {
+          return {
+            id: adminTeacher.userId,
+            username: adminTeacher.username,
+            displayName: adminTeacher.displayName
+          }
+        } else {
+          console.error('Admin teacher found but userId is missing')
+          return null
+        }
+      }
+
+      console.log(`No existing admin teacher found for: ${adminTeacherUsername}`)
+      return null
+    } catch (error) {
+      console.error('Failed to fetch existing admin teacher:', error)
+      return null
+    }
+  }
+
   public async migrate(
     students: UserData[],
     teachers: UserData[],
@@ -429,6 +467,21 @@ export class MigrationService {
     console.log(`${getTimestamp()} Fetching existing classes for prefix: ${schoolPrefix}...`)
     const existingClasses = await this.getExistingClasses(schoolPrefix)
     console.log(`${getTimestamp()} Found ${existingClasses.size} existing classes`)
+
+    // Check if admin teacher needs to be fetched
+    const hasAdminTeacherInList = teachers.some(t => t.classses.toUpperCase() === schoolPrefix.toUpperCase())
+    let existingAdminTeacherId: string | null = null
+
+    if (!hasAdminTeacherInList) {
+      console.log(`${getTimestamp()} Admin teacher not in create list, checking if one exists...`)
+      const existingAdminTeacher = await this.getExistingAdminTeacher(schoolPrefix)
+      if (existingAdminTeacher) {
+        existingAdminTeacherId = existingAdminTeacher.id
+        console.log(`${getTimestamp()} Will add existing admin teacher ${existingAdminTeacher.username} to all new classes`)
+      } else {
+        console.log(`${getTimestamp()} No existing admin teacher found`)
+      }
+    }
 
     const listUserError: UserData[] = []
     const listClassError: UserData[] = []
@@ -526,6 +579,12 @@ export class MigrationService {
                      classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())
             })
             .map(t => t.id)
+
+          // Add existing admin teacher if available
+          if (existingAdminTeacherId && !classTeachers.includes(existingAdminTeacherId)) {
+            console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Adding existing admin teacher to class ${classItem.username}`)
+            classTeachers.push(existingAdminTeacherId)
+          }
 
           await this.adminClient!.post('/manage/classes', {
             name: classItem.username,

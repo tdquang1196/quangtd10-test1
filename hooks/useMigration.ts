@@ -56,14 +56,45 @@ export const useMigration = () => {
     try {
       const uniqueClasses = Array.from(new Set(studentList.map(s => s.className)))
 
-      const response = await axios.post('/api/check-existing-classes', {
-        schoolPrefix: prefix,
-        classNames: uniqueClasses
+      // Get configuration
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL
+      const adminUsername = process.env.NEXT_PUBLIC_ADMIN_USERNAME || process.env.ADMIN_USERNAME
+      const adminPassword = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || process.env.ADMIN_PASSWORD
+
+      if (!apiUrl || !adminUsername || !adminPassword) {
+        console.error('Missing configuration')
+        return
+      }
+
+      // Login as admin
+      const loginResponse = await axios.post(`${apiUrl}/auth/login`, {
+        username: adminUsername,
+        password: adminPassword
       })
 
-      if (response?.data?.existingClasses) {
-        setExistingClasses(response.data.existingClasses)
-      }
+      const token = loginResponse.data.accessToken
+
+      // Fetch existing groups from backend
+      const groupsResponse = await axios.get(
+        `${apiUrl}/manage/User/Group?pageSize=1000&Text=${encodeURIComponent(prefix.toUpperCase())}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      )
+
+      // Create a map of existing class names
+      const existingClassNames = new Set(
+        groupsResponse.data.groups.map((g: any) => g.name.toLowerCase())
+      )
+
+      // Filter classes that exist
+      const existing = uniqueClasses.filter(className =>
+        existingClassNames.has(className.toLowerCase())
+      )
+
+      setExistingClasses(existing)
     } catch (error) {
       console.error('Failed to check existing classes:', error)
     } finally {
