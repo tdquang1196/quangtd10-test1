@@ -35,6 +35,15 @@ interface SaveUserGroupResult {
   }
 }
 
+interface UserGroupDTO {
+  id: string
+  name: string
+}
+
+interface GetUserGroupsResult {
+  groups: UserGroupDTO[]
+}
+
 interface MigrationResult {
   listDataStudent: UserData[]
   listDataTeacher: UserData[]
@@ -73,6 +82,27 @@ export class MigrationService {
         Authorization: `Bearer ${this.adminToken}`
       }
     })
+  }
+
+  private async getExistingClasses(schoolPrefix: string): Promise<Map<string, string>> {
+    try {
+      // Search for groups matching the school prefix
+      const response = await this.adminClient!.get<GetUserGroupsResult>(
+        `/manage/User/Group?Text=${encodeURIComponent(schoolPrefix.toUpperCase())}`
+      )
+
+      const classMap = new Map<string, string>()
+
+      // Map class/group name to its ID
+      response.data.groups.forEach(group => {
+        classMap.set(group.name.toLowerCase(), group.id)
+      })
+
+      return classMap
+    } catch (error) {
+      console.error('Failed to fetch existing classes:', error)
+      return new Map()
+    }
   }
 
   private async getExistingUsernames(filter: string): Promise<Set<string>> {
@@ -399,8 +429,28 @@ export class MigrationService {
     // Login as admin
     await this.loginAdmin()
 
+    // Extract school prefix from first class name (format: SCHOOLPREFIX_GRADE_YEAR)
+    const schoolPrefix = classes.length > 0 ? classes[0].username.split('_')[0] : ''
+
+    // Fetch existing classes
+    console.log(`${getTimestamp()} Fetching existing classes for prefix: ${schoolPrefix}...`)
+    const existingClasses = await this.getExistingClasses(schoolPrefix)
+    console.log(`${getTimestamp()} Found ${existingClasses.size} existing classes`)
+
     const listUserError: UserData[] = []
     const listClassError: UserData[] = []
+
+    // Filter teachers - only keep teachers for NEW classes (classes that don't exist yet)
+    const teachersToCreate = teachers.filter(teacher => {
+      // Check if teacher's class already exists
+      const classExists = existingClasses.has(teacher.classses.toLowerCase())
+      if (classExists) {
+        console.log(`${getTimestamp()} Skipping teacher ${teacher.username} - class ${teacher.classses} already exists`)
+      }
+      return !classExists
+    })
+
+    console.log(`${getTimestamp()} Teachers to create: ${teachersToCreate.length} (skipped ${teachers.length - teachersToCreate.length} for existing classes)`)
 
     // Process students
     console.log(`${getTimestamp()} Processing ${students.length} students...`)
@@ -410,11 +460,11 @@ export class MigrationService {
       await this.processUser(student, listUserError)
     }
 
-    // Process teachers
-    console.log(`${getTimestamp()} Processing ${teachers.length} teachers...`)
-    for (let i = 0; i < teachers.length; i++) {
-      const teacher = teachers[i]
-      console.log(`${getTimestamp()} [${i + 1}/${teachers.length}] Processing teacher: ${teacher.username} (${teacher.displayName})`)
+    // Process teachers (only for new classes)
+    console.log(`${getTimestamp()} Processing ${teachersToCreate.length} teachers...`)
+    for (let i = 0; i < teachersToCreate.length; i++) {
+      const teacher = teachersToCreate[i]
+      console.log(`${getTimestamp()} [${i + 1}/${teachersToCreate.length}] Processing teacher: ${teacher.username} (${teacher.displayName})`)
       await this.processUser(teacher, listUserError)
     }
 
@@ -422,9 +472,9 @@ export class MigrationService {
     console.log(`${getTimestamp()} Processing ${classes.length} classes...`)
     for (let i = 0; i < classes.length; i++) {
       const classItem = classes[i]
-      console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Creating class: ${classItem.username}`)
+      console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Processing class: ${classItem.username}`)
       try {
-        // Create user group
+        // Get students for this class
         const groupStudents = students
           .filter(s => s.classses === classItem.username && s.id)
           .map(s => s.id)
@@ -434,52 +484,71 @@ export class MigrationService {
           continue
         }
 
-        const createGroupResponse = await this.adminClient!.post<SaveUserGroupResult>('/manage/user/group', {
-          name: classItem.username,
-          users: groupStudents
-        })
+        // Check if class already exists in the system
+        const existingGroupId = existingClasses.get(classItem.username.toLowerCase())
 
-        const groupId = createGroupResponse.data.userGroup.id
+        if (existingGroupId) {
+          // Class exists - just add students to existing group (no teachers)
+          console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Class ${classItem.username} already exists (Group ID: ${existingGroupId}), adding ${groupStudents.length} students...`)
 
-        // Create class
-        const classTeachers = teachers
-          .filter(t =>
-            (t.classses.toLowerCase() === classItem.username.toLowerCase() ||
-              classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())) &&
-            t.id
-          )
-          .map(t => t.id)
+          await this.adminClient!.put('/manage/User/Group/Set', {
+            groupId: existingGroupId,
+            userIds: groupStudents
+          })
 
-        await this.adminClient!.post('/manage/classes', {
-          name: classItem.username,
-          description: classItem.username,
-          startDate: '2025-01-01T00:00:00.000Z',
-          endDate: '2026-04-01T00:00:00.000Z',
-          targetGroups: [groupId],
-          teachers: classTeachers,
-          grades: classItem.grade ? [classItem.grade] : []
-        })
+          console.log(`${getTimestamp()} [${i + 1}/${classes.length}] ✅ Added ${groupStudents.length} students to existing class ${classItem.username} (teachers not created)`)
+        } else {
+          // Class doesn't exist - create new class and group with teachers
+          console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Creating new class: ${classItem.username}`)
 
-        console.log(`${getTimestamp()} [${i + 1}/${classes.length}] ✅ Class ${classItem.username} created (${groupStudents.length} students, ${classTeachers.length} teachers)`)
+          const createGroupResponse = await this.adminClient!.post<SaveUserGroupResult>('/manage/user/group', {
+            name: classItem.username,
+            users: groupStudents
+          })
+
+          const groupId = createGroupResponse.data.userGroup.id
+
+          // Find teachers for this NEW class (only from teachersToCreate)
+          const classTeachers = teachersToCreate
+            .filter(t =>
+              (t.classses.toLowerCase() === classItem.username.toLowerCase() ||
+                classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())) &&
+              t.id
+            )
+            .map(t => t.id)
+
+          await this.adminClient!.post('/manage/classes', {
+            name: classItem.username,
+            description: classItem.username,
+            startDate: '2025-01-01T00:00:00.000Z',
+            endDate: '2026-04-01T00:00:00.000Z',
+            targetGroups: [groupId],
+            teachers: classTeachers,
+            grades: classItem.grade ? [classItem.grade] : []
+          })
+
+          console.log(`${getTimestamp()} [${i + 1}/${classes.length}] ✅ Class ${classItem.username} created (${groupStudents.length} students, ${classTeachers.length} teachers)`)
+        }
       } catch (error) {
-        console.error(`${getTimestamp()} [${i + 1}/${classes.length}] ❌ Failed to create class ${classItem.username}:`, error)
+        console.error(`${getTimestamp()} [${i + 1}/${classes.length}] ❌ Failed to process class ${classItem.username}:`, error)
         listClassError.push({ ...classItem })
       }
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(`${getTimestamp()} Migration completed in ${totalTime}s`)
-    console.log(`${getTimestamp()} Success: ${students.length + teachers.length - listUserError.length} users`)
+    console.log(`${getTimestamp()} Success: ${students.length + teachersToCreate.length - listUserError.length} users (${students.length} students, ${teachersToCreate.length} teachers)`)
     console.log(`${getTimestamp()} Failed: ${listUserError.length} users`)
+    console.log(`${getTimestamp()} Teachers skipped (existing classes): ${teachers.length - teachersToCreate.length}`)
     console.log(`${getTimestamp()} Class errors: ${listClassError.length}`)
 
     // Log JSON data for students
     console.log(`\n${getTimestamp()} === STUDENTS JSON DATA ===`)
     console.log(JSON.stringify(students, null, 2))
 
-    // Log JSON data for teachers
-    console.log(`\n${getTimestamp()} === TEACHERS JSON DATA ===`)
-    console.log(JSON.stringify(teachers, null, 2))
+    // Log JSON data for teachers (only those created)
+    console.log(`\n${getTimestamp()} === TEACHERS JSON DATA (Created) ===`)
+    console.log(JSON.stringify(teachersToCreate, null, 2))
 
     // Log JSON data for classes
     console.log(`\n${getTimestamp()} === CLASSES JSON DATA ===`)
@@ -497,14 +566,14 @@ export class MigrationService {
     }
 
     // Write results to file
-    const filepath = this.writeResultsToFile(students, teachers, classes, listUserError, listClassError)
+    const filepath = this.writeResultsToFile(students, teachersToCreate, classes, listUserError, listClassError)
     if (filepath) {
       console.log(`\n${getTimestamp()} Results saved to file: ${filepath}`)
     }
 
     return {
       listDataStudent: students,
-      listDataTeacher: teachers,
+      listDataTeacher: teachersToCreate,
       listDataClasses: classes,
       listUserError: listUserError,
       listClassError: listClassError

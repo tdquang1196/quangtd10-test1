@@ -150,13 +150,22 @@ export const useMigration = () => {
       }))
 
       const uniqueClasses = Array.from(new Set(students.map(s => s.className)))
-      const listDataClasses = uniqueClasses.map(className => ({
-        username: className,
-        displayName: '',
-        password: '',
-        classses: className,
-        phoneNumber: ''
-      }))
+      const listDataClasses = uniqueClasses.map(className => {
+        // Find the first student with this className to get the grade
+        const studentWithClass = students.find(s => s.className === className)
+        // Extract grade number from grade string (e.g., "1A" -> 1, "2B" -> 2)
+        const gradeMatch = studentWithClass?.grade.match(/^\d+/)
+        const gradeNumber = gradeMatch ? parseInt(gradeMatch[0]) : undefined
+
+        return {
+          username: className,
+          displayName: '',
+          password: '',
+          classses: className,
+          phoneNumber: '',
+          grade: gradeNumber
+        }
+      })
 
       const response = await axios.post('/api/migrate', {
         ListDataStudent: listDataStudent,
