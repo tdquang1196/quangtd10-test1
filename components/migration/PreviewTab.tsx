@@ -130,10 +130,13 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
             console.log('PreviewTab: Login successful, got new token')
 
             // Store new token
-            localStorage.setItem('auth_token', token)
-
-            // Retry fetching groups with new token
-            groupsResponse = await fetchGroups(token)
+            if (token) {
+              localStorage.setItem('auth_token', token)
+              // Retry fetching groups with new token
+              groupsResponse = await fetchGroups(token)
+            } else {
+              throw new Error('Failed to get access token')
+            }
           } else {
             throw error
           }

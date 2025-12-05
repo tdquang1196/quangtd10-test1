@@ -12,11 +12,7 @@ export const FeatureCard: React.FC<FeatureCardProps> = ({ feature }) => {
   const isBeta = feature.status === 'beta'
   const isComingSoon = feature.status === 'coming-soon'
 
-  const CardWrapper = isActive ? Link : 'div'
-  const cardProps = isActive ? { href: feature.route } : {}
-
-  return (
-    <CardWrapper {...cardProps}>
+  const content = (
       <div className={`group bg-white rounded-lg border border-gray-200 p-5 transition-all ${
         isActive ? 'hover:border-gray-900 hover:shadow-sm cursor-pointer' : 'opacity-60'
       } ${isComingSoon ? 'cursor-not-allowed' : ''}`}>
@@ -48,6 +44,11 @@ export const FeatureCard: React.FC<FeatureCardProps> = ({ feature }) => {
           {feature.description}
         </p>
       </div>
-    </CardWrapper>
+  )
+
+  return isActive ? (
+    <Link href={feature.route}>{content}</Link>
+  ) : (
+    content
   )
 }

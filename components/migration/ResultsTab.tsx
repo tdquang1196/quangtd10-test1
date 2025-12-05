@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { MigrationResult } from '@/types'
 import { Card, CardHeader, CardTitle, CardContent, Badge, Button, Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui'
+import { PackageAssignmentSection } from './PackageAssignmentSection'
 
 interface ResultsTabProps {
   result: MigrationResult | null
@@ -9,6 +11,12 @@ interface ResultsTabProps {
 }
 
 export default function ResultsTab({ result, createdUsers, failedUsers, showNotification }: ResultsTabProps) {
+  // Package assignment tracking
+  const [packageAssignmentStatus, setPackageAssignmentStatus] = useState<{
+    attempted: boolean
+    successCount: number
+    failedCount: number
+  } | null>(null)
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).then(() => {
       showNotification('Copied to clipboard!', 'success')
@@ -34,6 +42,11 @@ export default function ResultsTab({ result, createdUsers, failedUsers, showNoti
         totalStudents: successStudents.length,
         totalTeachers: successTeachers.length,
         totalUsers: successStudents.length + successTeachers.length
+      },
+      packageAssignment: packageAssignmentStatus || {
+        attempted: false,
+        successCount: 0,
+        failedCount: 0
       }
     }
 
@@ -62,6 +75,41 @@ export default function ResultsTab({ result, createdUsers, failedUsers, showNoti
   const successTeachers = result?.ListDataTeacher.filter((t: any) =>
     !result.ListUserError.find((e: any) => e.username === t.username)
   ) || []
+
+  // Transform successful students for package assignment (only students with IDs)
+  const studentsForPackage = successStudents
+    .filter(s => s.id) // Ensure ID exists
+    .map(s => ({
+      userId: s.id!,
+      username: s.actualUserName || s.username,
+      displayName: s.displayName
+    }))
+
+  // Package assignment callbacks
+  const handlePackageSuccess = (successCount: number, failedCount: number) => {
+    setPackageAssignmentStatus({
+      attempted: true,
+      successCount,
+      failedCount
+    })
+
+    // Show notification
+    if (failedCount === 0) {
+      showNotification(
+        `Successfully assigned packages to all ${successCount} students`,
+        'success'
+      )
+    } else {
+      showNotification(
+        `Packages assigned: ${successCount} succeeded, ${failedCount} failed`,
+        'warning'
+      )
+    }
+  }
+
+  const handlePackageError = (error: string) => {
+    showNotification(`Package assignment failed: ${error}`, 'error')
+  }
 
   return (
     <div className="space-y-6">
@@ -188,6 +236,22 @@ export default function ResultsTab({ result, createdUsers, failedUsers, showNoti
             Copy All Success Data (JSON)
           </Button>
         </div>
+      )}
+
+      {/* Package Assignment Section */}
+      {studentsForPackage.length > 0 && (
+        <>
+          <div className="border-t-2 border-gray-200 my-8" />
+          <div className="text-center mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">Package Assignment</h3>
+            <p className="text-sm text-gray-600">Assign subscription packages to newly created students</p>
+          </div>
+          <PackageAssignmentSection
+            users={studentsForPackage}
+            onSuccess={handlePackageSuccess}
+            onError={handlePackageError}
+          />
+        </>
       )}
 
       {/* Failed Users */}
