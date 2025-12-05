@@ -68,6 +68,31 @@ export default function ResultsTab({ result, createdUsers, failedUsers, showNoti
     copyToClipboard(JSON.stringify(jsonData, null, 2))
   }
 
+  const copyStudentUsernames = () => {
+    const usernames = successStudents.map((s: any) => s.actualUserName || s.username).join('\n')
+    copyToClipboard(usernames)
+  }
+
+  const copyStudentPasswords = () => {
+    const passwords = successStudents.map((s: any) => s.password).join('\n')
+    copyToClipboard(passwords)
+  }
+
+  const copyTeacherUsernames = () => {
+    const usernames = successTeachers.map((t: any) => t.actualUserName || t.username).join('\n')
+    copyToClipboard(usernames)
+  }
+
+  const copyTeacherPasswords = () => {
+    const passwords = successTeachers.map((t: any) => t.password).join('\n')
+    copyToClipboard(passwords)
+  }
+
+  const copyTeacherClasses = () => {
+    const classes = successTeachers.map((t: any) => t.classses).join('\n')
+    copyToClipboard(classes)
+  }
+
   const successStudents = result?.ListDataStudent.filter((s: any) =>
     !result.ListUserError.find((e: any) => e.username === s.username)
   ) || []
@@ -220,21 +245,112 @@ export default function ResultsTab({ result, createdUsers, failedUsers, showNoti
         </Card>
       )}
 
-      {/* Copy Success Button */}
+      {/* Copy Buttons */}
       {result && createdUsers.length > 0 && (
-        <div className="flex justify-center">
-          <Button
-            onClick={copySuccessData}
-            variant="success"
-            size="lg"
-            icon={
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
-            }
-          >
-            Copy All Success Data (JSON)
-          </Button>
+        <div className="space-y-4">
+          {/* Main Copy Button */}
+          <div className="flex justify-center">
+            <Button
+              onClick={copySuccessData}
+              variant="success"
+              size="lg"
+              icon={
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              }
+            >
+              Copy All Success Data (JSON)
+            </Button>
+          </div>
+
+          {/* Quick Copy Buttons Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {/* Student Usernames */}
+            {successStudents.length > 0 && (
+              <Button
+                onClick={copyStudentUsernames}
+                variant="secondary"
+                size="md"
+                className="w-full"
+                icon={
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                }
+              >
+                Copy Student Usernames
+              </Button>
+            )}
+
+            {/* Student Passwords */}
+            {successStudents.length > 0 && (
+              <Button
+                onClick={copyStudentPasswords}
+                variant="secondary"
+                size="md"
+                className="w-full"
+                icon={
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                }
+              >
+                Copy Student Passwords
+              </Button>
+            )}
+
+            {/* Teacher Usernames */}
+            {successTeachers.length > 0 && (
+              <Button
+                onClick={copyTeacherUsernames}
+                variant="secondary"
+                size="md"
+                className="w-full"
+                icon={
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                  </svg>
+                }
+              >
+                Copy Teacher Usernames
+              </Button>
+            )}
+
+            {/* Teacher Passwords */}
+            {successTeachers.length > 0 && (
+              <Button
+                onClick={copyTeacherPasswords}
+                variant="secondary"
+                size="md"
+                className="w-full"
+                icon={
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+                  </svg>
+                }
+              >
+                Copy Teacher Passwords
+              </Button>
+            )}
+
+            {/* Teacher Classes */}
+            {successTeachers.length > 0 && (
+              <Button
+                onClick={copyTeacherClasses}
+                variant="secondary"
+                size="md"
+                className="w-full"
+                icon={
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                }
+              >
+                Copy Teacher Classes
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
