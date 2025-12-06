@@ -14,6 +14,8 @@ interface UserData {
   phoneNumber: string
   reason?: string
   grade?: number
+  accessToken?: string // Store access token from registration to avoid re-login
+  loginDisplayName?: string // Store login display name from Phase 1 for fallback in Phase 2
 }
 
 interface LoginResult {
@@ -389,8 +391,8 @@ export class MigrationService {
   }
 
   /**
-   * Phase 1: Register user account and get username
-   * This phase only creates the account, does NOT initialize character
+   * Phase 1: Register user account and get username + access token
+   * This phase creates the account and immediately gets the access token to avoid re-login in Phase 2
    */
   private async registerUserAccount(user: UserData, listUserError: UserData[]): Promise<void> {
     // Check existing usernames
@@ -413,7 +415,7 @@ export class MigrationService {
 
     user.actualUserName = registerResult.actualUsername!
 
-    // Login to get user ID
+    // Login to get user ID and access token (save token to avoid re-login in Phase 2)
     const loginResult = await this.loginUser(user.actualUserName, user.password)
     if (!loginResult) {
       user.reason = 'Login failed after registration'
@@ -422,32 +424,30 @@ export class MigrationService {
     }
 
     user.id = loginResult.userId
+    user.accessToken = loginResult.accessToken // ✨ Save access token for Phase 2
+    user.loginDisplayName = loginResult.displayName // ✨ Save login display name for Phase 2
   }
 
   /**
-   * Phase 2: Initialize user character (login, display name, equipment, phone)
-   * This phase assumes the user account already exists from Phase 1
+   * Phase 2: Initialize user character (display name, equipment, phone)
+   * This phase uses the access token saved from Phase 1, avoiding re-login
    */
   private async initializeUserCharacter(user: UserData, listUserError: UserData[]): Promise<void> {
-    // Skip if user doesn't have actualUserName (registration failed)
-    if (!user.actualUserName) {
+    // Skip if user doesn't have actualUserName or accessToken (registration failed)
+    if (!user.actualUserName || !user.accessToken) {
       return
     }
 
-    // Login as user
-    const loginResult = await this.loginUser(user.actualUserName, user.password)
-    if (!loginResult) {
-      user.reason = 'Login failed during character initialization'
-      listUserError.push({ ...user })
-      return
-    }
-
+    // ✨ Use saved access token from Phase 1 (no need to login again)
     const userClient = axios.create({
       baseURL: this.baseUrl,
       headers: {
-        Authorization: `Bearer ${loginResult.accessToken}`
+        Authorization: `Bearer ${user.accessToken}`
       }
     })
+
+    // ✨ Use saved login display name from Phase 1 (no need to call API again)
+    const defaultDisplayName = user.loginDisplayName || user.actualUserName
 
     // Check and validate display name
     const existingDisplayNames = await this.getExistingDisplayNames(user.displayName)
@@ -474,7 +474,7 @@ export class MigrationService {
           isUpdateToUserName = true
           tempDisplayIdx = 0
         } else {
-          baseDisplayName = loginResult.displayName
+          baseDisplayName = defaultDisplayName
           tempDisplayIdx = 0
         }
       } else {
@@ -488,11 +488,11 @@ export class MigrationService {
       userClient,
       user.displayName,
       user.actualUserName,
-      loginResult.displayName
+      defaultDisplayName
     )
 
-    // Use validated display name or fallback to login display name
-    user.actualDisplayName = validatedDisplayName || loginResult.displayName
+    // Use validated display name or fallback to default display name
+    user.actualDisplayName = validatedDisplayName || defaultDisplayName
 
     // Set equipment and profile (continue even if this fails)
     try {
