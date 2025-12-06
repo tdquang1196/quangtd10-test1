@@ -56,11 +56,6 @@ interface MigrationResult {
 const MIN_LENGTH_DISPLAY_NAME = 2
 const MAX_LENGTH_DISPLAY_NAME = 20
 
-// Batch processing configuration
-// Note: Registration runs sequentially (1 thread) to avoid server spam prevention
-const INIT_BATCH_SIZE = 5 // Number of users to initialize concurrently in Phase 2
-const MAX_CONCURRENT_GROUPS = 5 // Maximum number of display name groups to process in parallel
-
 export class MigrationService {
   private baseUrl: string
   private adminUsername: string
@@ -72,51 +67,6 @@ export class MigrationService {
     this.baseUrl = baseUrl
     this.adminUsername = adminUsername
     this.adminPassword = adminPassword
-  }
-
-  /**
-   * Group users by their base username to prevent parallel conflicts
-   */
-  private groupByUsername(users: UserData[]): Map<string, UserData[]> {
-    const groups = new Map<string, UserData[]>()
-
-    for (const user of users) {
-      const baseUsername = user.username.toLowerCase()
-      if (!groups.has(baseUsername)) {
-        groups.set(baseUsername, [])
-      }
-      groups.get(baseUsername)!.push(user)
-    }
-
-    return groups
-  }
-
-  /**
-   * Group users by their base display name to prevent parallel conflicts
-   */
-  private groupByDisplayName(users: UserData[]): Map<string, UserData[]> {
-    const groups = new Map<string, UserData[]>()
-
-    for (const user of users) {
-      const baseDisplayName = user.displayName.toLowerCase()
-      if (!groups.has(baseDisplayName)) {
-        groups.set(baseDisplayName, [])
-      }
-      groups.get(baseDisplayName)!.push(user)
-    }
-
-    return groups
-  }
-
-  /**
-   * Split an array into batches of specified size
-   */
-  private createBatches<T>(items: T[], batchSize: number): T[][] {
-    const batches: T[][] = []
-    for (let i = 0; i < items.length; i += batchSize) {
-      batches.push(items.slice(i, i + batchSize))
-    }
-    return batches
   }
 
   private async loginAdmin(): Promise<void> {
@@ -270,37 +220,9 @@ export class MigrationService {
           }
         } else if (content.includes('true') || response.data === true) {
           return tryDisplayName
-        } else {
-          return loginDisplayName
         }
-      } catch (error: any) {
-        // Backend returns 417 status code with error message in response body
-        if (error.response?.data?.message) {
-          const errorMessage = error.response.data.message
-
-          if (errorMessage.includes('DISPLAY_NAME_EXISTED')) {
-            idx++
-            continue
-          } else if (errorMessage.includes('INVALID_DISPLAY_NAME')) {
-            if (!isSubstringDisplayName) {
-              const parts = displayName.split(' ')
-              displayName = parts[parts.length - 1]
-              isSubstringDisplayName = true
-              idx = 0
-            } else if (!isUpdateToUserName) {
-              displayName = actualUsername
-              isUpdateToUserName = true
-              idx = 0
-            } else {
-              return loginDisplayName
-            }
-          } else {
-            return loginDisplayName
-          }
-        } else {
-          console.error(`[validateDisplayName] Error validating '${displayName}':`, error.message)
-          return null
-        }
+      } catch (error) {
+        return null
       }
     }
   }
@@ -388,11 +310,7 @@ export class MigrationService {
     }
   }
 
-  /**
-   * Phase 1: Register user account and get username
-   * This phase only creates the account, does NOT initialize character
-   */
-  private async registerUserAccount(user: UserData, listUserError: UserData[]): Promise<void> {
+  private async processUser(user: UserData, listUserError: UserData[]): Promise<void> {
     // Check existing usernames
     const existingUsernames = await this.getExistingUsernames(user.username)
     let tempIdx = 0
@@ -413,34 +331,15 @@ export class MigrationService {
 
     user.actualUserName = registerResult.actualUsername!
 
-    // Login to get user ID
+    // Login as user
     const loginResult = await this.loginUser(user.actualUserName, user.password)
     if (!loginResult) {
-      user.reason = 'Login failed after registration'
+      user.reason = 'Login failed'
       listUserError.push({ ...user })
       return
     }
 
     user.id = loginResult.userId
-  }
-
-  /**
-   * Phase 2: Initialize user character (login, display name, equipment, phone)
-   * This phase assumes the user account already exists from Phase 1
-   */
-  private async initializeUserCharacter(user: UserData, listUserError: UserData[]): Promise<void> {
-    // Skip if user doesn't have actualUserName (registration failed)
-    if (!user.actualUserName) {
-      return
-    }
-
-    // Login as user
-    const loginResult = await this.loginUser(user.actualUserName, user.password)
-    if (!loginResult) {
-      user.reason = 'Login failed during character initialization'
-      listUserError.push({ ...user })
-      return
-    }
 
     const userClient = axios.create({
       baseURL: this.baseUrl,
@@ -507,15 +406,6 @@ export class MigrationService {
     } catch (error) {
       console.error('Phone number update failed:', error)
     }
-  }
-
-  /**
-   * Legacy method kept for backward compatibility
-   * Uses the new two-phase approach internally
-   */
-  private async processUser(user: UserData, listUserError: UserData[]): Promise<void> {
-    await this.registerUserAccount(user, listUserError)
-    await this.initializeUserCharacter(user, listUserError)
   }
 
   private async getExistingAdminTeacher(schoolPrefix: string): Promise<{ id: string; username: string; displayName: string } | null> {
@@ -616,88 +506,21 @@ export class MigrationService {
 
     console.log(`${getTimestamp()} Teachers to create: ${teachersToCreate.length} (skipped ${teachers.length - teachersToCreate.length} for existing classes)`)
 
-    // Preserve original order from Excel file by adding index
-    students.forEach((student, index) => {
-      (student as any).originalIndex = index
-    })
-    teachersToCreate.forEach((teacher, index) => {
-      (teacher as any).originalIndex = students.length + index
-    })
-
-    // ===== PHASE 1: USER REGISTRATION (Sequential - to avoid spam prevention) =====
-    console.log(`\n${getTimestamp()} ========== PHASE 1: USER REGISTRATION (Sequential) ==========`)
-    const allUsers = [...students, ...teachersToCreate]
-    console.log(`${getTimestamp()} Processing ${allUsers.length} user registrations sequentially to avoid spam prevention`)
-
-    let processedRegistrations = 0
-    // Process users one by one sequentially
-    for (const user of allUsers) {
-      await this.registerUserAccount(user, listUserError)
-      processedRegistrations++
-      console.log(`${getTimestamp()} [Registration] ${processedRegistrations}/${allUsers.length} - Registered: ${user.actualUserName || user.username}`)
+    // Process students
+    console.log(`${getTimestamp()} Processing ${students.length} students...`)
+    for (let i = 0; i < students.length; i++) {
+      const student = students[i]
+      console.log(`${getTimestamp()} [${i + 1}/${students.length}] Processing student: ${student.username} (${student.displayName})`)
+      await this.processUser(student, listUserError)
     }
 
-    console.log(`${getTimestamp()} Phase 1 complete: ${processedRegistrations} registrations processed, ${listUserError.length} failed`)
-
-    // ===== PHASE 2: CHARACTER INITIALIZATION (Grouped by Display Name) =====
-    console.log(`\n${getTimestamp()} ========== PHASE 2: CHARACTER INITIALIZATION ==========`)
-
-    // Only initialize characters for successfully registered users
-    const successfullyRegistered = allUsers.filter(u => u.actualUserName && !listUserError.some(err => err.username === u.username))
-    console.log(`${getTimestamp()} ${successfullyRegistered.length} users successfully registered, proceeding to character initialization`)
-
-    // Group by display name to prevent conflicts
-    const displayNameGroups = this.groupByDisplayName(successfullyRegistered)
-    console.log(`${getTimestamp()} Grouped ${successfullyRegistered.length} users into ${displayNameGroups.size} display name groups`)
-
-    let processedInits = 0
-
-    // Convert groups to array
-    const groupEntries = Array.from(displayNameGroups.entries())
-
-    // Process display name groups with concurrency pool
-    // When a group finishes, immediately start the next one
-    // This ensures we always have MAX_CONCURRENT_GROUPS running
-    let activeGroups = 0
-    let currentIndex = 0
-    const totalGroups = groupEntries.length
-
-    const processNextGroup = async (): Promise<void> => {
-      if (currentIndex >= totalGroups) return
-
-      const index = currentIndex++
-      const [baseDisplayName, usersInGroup] = groupEntries[index]
-
-      activeGroups++
-      console.log(`${getTimestamp()} [Initialization] Processing display name group: ${baseDisplayName} (${usersInGroup.length} users) [${activeGroups} active groups]`)
-
-      try {
-        // Process users in this group sequentially to ensure unique display names
-        for (const user of usersInGroup) {
-          await this.initializeUserCharacter(user, listUserError)
-          processedInits++
-          console.log(`${getTimestamp()} [Initialization] ${processedInits}/${successfullyRegistered.length} - Initialized: ${user.actualUserName} (${user.actualDisplayName || user.displayName})`)
-        }
-      } finally {
-        activeGroups--
-        // When this group finishes, start the next one
-        await processNextGroup()
-      }
+    // Process teachers (only for new classes)
+    console.log(`${getTimestamp()} Processing ${teachersToCreate.length} teachers...`)
+    for (let i = 0; i < teachersToCreate.length; i++) {
+      const teacher = teachersToCreate[i]
+      console.log(`${getTimestamp()} [${i + 1}/${teachersToCreate.length}] Processing teacher: ${teacher.username} (${teacher.displayName})`)
+      await this.processUser(teacher, listUserError)
     }
-
-    // Start initial batch of groups
-    const initialPromises = []
-    for (let i = 0; i < Math.min(MAX_CONCURRENT_GROUPS, totalGroups); i++) {
-      initialPromises.push(processNextGroup())
-    }
-
-    await Promise.all(initialPromises)
-
-    console.log(`${getTimestamp()} Phase 2 complete: ${processedInits} characters initialized`)
-
-    // Restore original order from Excel file
-    students.sort((a, b) => ((a as any).originalIndex || 0) - ((b as any).originalIndex || 0))
-    teachersToCreate.sort((a, b) => ((a as any).originalIndex || 0) - ((b as any).originalIndex || 0))
 
     // Process classes
     console.log(`${getTimestamp()} Processing ${classes.length} classes...`)
@@ -747,13 +570,13 @@ export class MigrationService {
             .filter(t => {
               if (!t.id) return false
 
-              // Adminteacher (className is schoolPrefix) - add to ALL classes
+              // Admin teacher (className is schoolPrefix) - add to ALL classes
               const isAdminTeacher = t.classses.toUpperCase() === schoolPrefix.toUpperCase()
               if (isAdminTeacher) return true
 
               // Class-specific teacher
               return t.classses.toLowerCase() === classItem.username.toLowerCase() ||
-                classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())
+                     classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())
             })
             .map(t => t.id)
 
@@ -775,13 +598,8 @@ export class MigrationService {
 
           console.log(`${getTimestamp()} [${i + 1}/${classes.length}] ✅ Class ${classItem.username} created (${groupStudents.length} students, ${classTeachers.length} teachers)`)
         }
-      } catch (error: any) {
-        console.error(`${getTimestamp()} [${i + 1}/${classes.length}] ❌ Failed to process class ${classItem.username}:`, error.message)
-        if (error.response) {
-          console.error(`${getTimestamp()} Response status: ${error.response.status}`)
-          console.error(`${getTimestamp()} Response data:`, JSON.stringify(error.response.data))
-        }
-        classItem.reason = error.response?.data?.message || error.message
+      } catch (error) {
+        console.error(`${getTimestamp()} [${i + 1}/${classes.length}] ❌ Failed to process class ${classItem.username}:`, error)
         listClassError.push({ ...classItem })
       }
     }
