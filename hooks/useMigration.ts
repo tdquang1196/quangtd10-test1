@@ -73,13 +73,13 @@ export const useMigration = () => {
         return
       }
 
-      // Login as admin
-      const loginResponse = await axios.post(`${apiUrl}/auth/login`, {
-        username: adminUsername,
-        password: adminPassword
-      })
+      // Use existing token from localStorage instead of logging in as admin
+      const token = localStorage.getItem('auth_token')
 
-      const token = loginResponse.data.accessToken
+      if (!token) {
+        console.warn('No auth token found for checking classes')
+        return
+      }
 
       // Fetch existing groups from backend
       const groupsResponse = await axios.get(
@@ -238,10 +238,15 @@ export const useMigration = () => {
         }
       })
 
+      const token = localStorage.getItem('auth_token')
       const response = await axios.post('/api/migrate', {
         ListDataStudent: listDataStudent,
         ListDataTeacher: listDataTeacher,
         ListDataClasses: listDataClasses
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
       })
 
       const apiResult = response.data
@@ -409,10 +414,15 @@ export const useMigration = () => {
           }
         })
 
+        const token = localStorage.getItem('auth_token')
         const response = await axios.post('/api/migrate', {
           ListDataStudent: listDataStudent,
           ListDataTeacher: listDataTeacher,
           ListDataClasses: listDataClasses
+        }, {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
         })
 
         const apiResult = response.data

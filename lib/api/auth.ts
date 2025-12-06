@@ -35,20 +35,26 @@ export async function login(credentials: LoginRequest): Promise<string> {
 }
 
 /**
- * Verify if token is valid (optional - can be used for token refresh)
+ * Verify if token is valid by calling /manage/user/permissions
+ * If the API returns 200, the token is valid
+ * If it returns 401, the token is expired/invalid
  * @param token - JWT token to verify
  * @returns Promise<boolean>
  */
 export async function verifyToken(token: string): Promise<boolean> {
   try {
-    // This endpoint may not exist yet - placeholder for future
-    const response = await axiosMeduverse.get('/auth/verify', {
+    const response = await axiosMeduverse.get('/manage/user/permissions', {
       headers: {
         Authorization: `Bearer ${token}`
       }
     })
     return response.status === 200
-  } catch (error) {
+  } catch (error: any) {
+    // 401 = token expired/invalid
+    // Other errors = network issues, etc.
+    if (error.response?.status === 401) {
+      console.warn('Token verification failed: Token is invalid or expired')
+    }
     return false
   }
 }

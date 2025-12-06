@@ -32,10 +32,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (!adminUsername || !adminPassword) {
+    // Extract auth token from request header
+    const authHeader = request.headers.get('authorization')
+    const authToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined
+
+    if (!authToken && (!adminUsername || !adminPassword)) {
       return NextResponse.json(
-        { error: 'Admin credentials not configured' },
-        { status: 500 }
+        { error: 'Authentication required. Please provide Authorization header or configure Admin credentials.' },
+        { status: 401 }
       )
     }
 
@@ -52,10 +56,13 @@ export async function POST(request: NextRequest) {
     }))
 
     // Initialize migration service
+    // We pass adminUsername/password as empty strings if we have a token, 
+    // but keep them if we want to fallback (though new logic prefers token)
     const migrationService = new MigrationService(
       apiUrl,
-      adminUsername,
-      adminPassword
+      adminUsername || '',
+      adminPassword || '',
+      authToken
     )
 
     // Execute migration

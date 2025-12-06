@@ -70,10 +70,22 @@ export class MigrationService {
   private adminClient?: AxiosInstance
   private adminToken?: string
 
-  constructor(baseUrl: string, adminUsername: string, adminPassword: string) {
+  constructor(baseUrl: string, adminUsername: string, adminPassword: string, authToken?: string) {
     this.baseUrl = baseUrl
     this.adminUsername = adminUsername
     this.adminPassword = adminPassword
+
+    // If auth token is provided, initialize client immediately
+    if (authToken) {
+      this.adminToken = authToken
+      this.adminClient = axios.create({
+        baseURL: this.baseUrl,
+        headers: {
+          Authorization: `Bearer ${this.adminToken}`
+        }
+      })
+      console.log('✓ Using provided auth token, skipping admin login')
+    }
   }
 
   /**
@@ -801,29 +813,6 @@ export class MigrationService {
     console.log(`${getTimestamp()} Failed: ${listUserError.length} users`)
     console.log(`${getTimestamp()} Teachers skipped (existing classes): ${teachers.length - teachersToCreate.length}`)
     console.log(`${getTimestamp()} Class errors: ${listClassError.length}`)
-
-    // Log JSON data for students
-    console.log(`\n${getTimestamp()} === STUDENTS JSON DATA ===`)
-    console.log(JSON.stringify(students, null, 2))
-
-    // Log JSON data for teachers (only those created)
-    console.log(`\n${getTimestamp()} === TEACHERS JSON DATA (Created) ===`)
-    console.log(JSON.stringify(teachersToCreate, null, 2))
-
-    // Log JSON data for classes
-    console.log(`\n${getTimestamp()} === CLASSES JSON DATA ===`)
-    console.log(JSON.stringify(classes, null, 2))
-
-    // Log JSON data for errors
-    if (listUserError.length > 0) {
-      console.log(`\n${getTimestamp()} === USER ERRORS JSON DATA ===`)
-      console.log(JSON.stringify(listUserError, null, 2))
-    }
-
-    if (listClassError.length > 0) {
-      console.log(`\n${getTimestamp()} === CLASS ERRORS JSON DATA ===`)
-      console.log(JSON.stringify(listClassError, null, 2))
-    }
 
     // Write results to file
     const filepath = this.writeResultsToFile(students, teachersToCreate, classes, listUserError, listClassError)
