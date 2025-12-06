@@ -221,8 +221,36 @@ export class MigrationService {
         } else if (content.includes('true') || response.data === true) {
           return tryDisplayName
         }
-      } catch (error) {
-        return null
+      } catch (error: any) {
+        // Backend returns 417 status code with error message in response body
+        if (error.response?.data?.message) {
+          const errorMessage = error.response.data.message
+
+          if (errorMessage.includes('DISPLAY_NAME_EXISTED')) {
+            idx++
+            continue
+          } else if (errorMessage.includes('INVALID_DISPLAY_NAME')) {
+            if (!isSubstringDisplayName) {
+              const parts = displayName.split(' ')
+              displayName = parts[parts.length - 1]
+              isSubstringDisplayName = true
+              idx = 0
+            } else if (!isUpdateToUserName) {
+              displayName = actualUsername
+              isUpdateToUserName = true
+              idx = 0
+            } else {
+              return loginDisplayName
+            }
+          } else {
+            return loginDisplayName
+          }
+        } else {
+          console.error(`[validateDisplayName] Error validating '${displayName}':`, error.message)
+          return null
+        }
+
+
       }
     }
   }
@@ -576,7 +604,7 @@ export class MigrationService {
 
               // Class-specific teacher
               return t.classses.toLowerCase() === classItem.username.toLowerCase() ||
-                     classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())
+                classItem.username.toLowerCase().startsWith(t.classses.toLowerCase())
             })
             .map(t => t.id)
 
