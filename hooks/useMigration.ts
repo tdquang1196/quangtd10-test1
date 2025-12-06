@@ -23,6 +23,13 @@ export const useMigration = () => {
   const [isCheckingClasses, setIsCheckingClasses] = useState(false)
   const [includeAdminTeacher, setIncludeAdminTeacher] = useState(false)
 
+  // Batch migration state
+  const [batchResults, setBatchResults] = useState<any[]>([])
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false)
+  const [currentSchoolIndex, setCurrentSchoolIndex] = useState(0)
+  const [totalSchools, setTotalSchools] = useState(0)
+  const [batchPreviewData, setBatchPreviewData] = useState<any[]>([])
+
   const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setNotification({ message, type })
   }
@@ -268,6 +275,190 @@ export const useMigration = () => {
     }
   }
 
+  // Process batch files and show preview
+  const handleProcessBatch = async (schools: Array<{
+    id: string
+    file: File | null
+    schoolPrefix: string
+    createAdminTeacher: boolean
+  }>) => {
+    setIsProcessing(true)
+    setBatchPreviewData([])
+
+    const previewData: any[] = []
+
+    for (let i = 0; i < schools.length; i++) {
+      const school = schools[i]
+      setProgressMessage(`Processing file ${i + 1}/${schools.length}: ${school.schoolPrefix}`)
+
+      try {
+        const fileData = await new Promise<any>((resolve, reject) => {
+          if (!school.file) {
+            reject(new Error('No file provided'))
+            return
+          }
+
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            try {
+              const data = new Uint8Array(e.target?.result as ArrayBuffer)
+              const workbook = XLSX.read(data, { type: 'array' })
+              const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
+              const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: ['fullName', 'grade', 'phoneNumber'] })
+
+              const excelRows = jsonData
+                .map((row: any) => ({
+                  fullName: row.fullName?.toString().trim() || '',
+                  grade: row.grade?.toString().trim() || '',
+                  phoneNumber: row.phoneNumber?.toString().trim() || ''
+                }))
+                .filter(row => row.fullName && row.grade)
+
+              const processed = processExcelData(
+                excelRows,
+                school.schoolPrefix.trim().toLowerCase(),
+                new Set(),
+                new Set(),
+                school.createAdminTeacher
+              )
+
+              resolve(processed)
+            } catch (error) {
+              reject(error)
+            }
+          }
+          reader.onerror = () => reject(new Error('Failed to read file'))
+          reader.readAsArrayBuffer(school.file)
+        })
+
+        const uniqueClasses = Array.from(new Set(fileData.students.map((s: any) => s.className)))
+
+        previewData.push({
+          schoolPrefix: school.schoolPrefix,
+          students: fileData.students,
+          teachers: fileData.teachers,
+          classes: uniqueClasses,
+          createAdminTeacher: school.createAdminTeacher
+        })
+      } catch (error) {
+        console.error(`Failed to process file for ${school.schoolPrefix}:`, error)
+        showNotification(
+          `Failed to process ${school.schoolPrefix}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          'error'
+        )
+        setIsProcessing(false)
+        return
+      }
+    }
+
+    setBatchPreviewData(previewData)
+    setIsProcessing(false)
+    setActiveTab('batch-preview')
+    showNotification(
+      `Processed ${previewData.length} schools successfully`,
+      'success'
+    )
+  }
+
+  // Create users from batch preview data
+  const handleCreateBatch = async () => {
+    if (batchPreviewData.length === 0) return
+
+    setIsBatchProcessing(true)
+    setTotalSchools(batchPreviewData.length)
+    setCurrentSchoolIndex(0)
+    setBatchResults([])
+    setActiveTab('batch-results')
+
+    const results: any[] = []
+
+    for (let i = 0; i < batchPreviewData.length; i++) {
+      const school = batchPreviewData[i]
+      setCurrentSchoolIndex(i + 1)
+      setProgressMessage(`Migrating school ${i + 1}/${batchPreviewData.length}: ${school.schoolPrefix}`)
+
+      try {
+        const listDataStudent = school.students.map((student: any) => ({
+          username: student.username,
+          displayName: student.displayName,
+          password: student.password,
+          classses: student.className,
+          phoneNumber: student.phoneNumber || ''
+        }))
+
+        const listDataTeacher = school.teachers.map((teacher: any) => ({
+          username: teacher.username,
+          displayName: teacher.displayName,
+          password: teacher.password,
+          classses: teacher.className,
+          phoneNumber: ''
+        }))
+
+        const listDataClasses = school.classes.map((className: string) => {
+          const studentWithClass = school.students.find((s: any) => s.className === className)
+          const gradeMatch = studentWithClass?.grade.match(/^\d+/)
+          const gradeNumber = gradeMatch ? parseInt(gradeMatch[0]) : undefined
+
+          return {
+            username: className,
+            displayName: '',
+            password: '',
+            classses: className,
+            phoneNumber: '',
+            grade: gradeNumber
+          }
+        })
+
+        const response = await axios.post('/api/migrate', {
+          ListDataStudent: listDataStudent,
+          ListDataTeacher: listDataTeacher,
+          ListDataClasses: listDataClasses
+        })
+
+        const apiResult = response.data
+
+        results.push({
+          schoolPrefix: school.schoolPrefix,
+          students: apiResult.ListDataStudent || [],
+          teachers: apiResult.ListDataTeacher || [],
+          classes: apiResult.ListDataClasses || [],
+          failedUsers: apiResult.ListUserError || [],
+          failedClasses: apiResult.ListClassError || []
+        })
+
+        showNotification(
+          `✅ ${school.schoolPrefix}: Created ${(apiResult.ListDataStudent?.length || 0) + (apiResult.ListDataTeacher?.length || 0)} users`,
+          'success'
+        )
+      } catch (error) {
+        console.error(`Failed to migrate school ${school.schoolPrefix}:`, error)
+        results.push({
+          schoolPrefix: school.schoolPrefix,
+          students: [],
+          teachers: [],
+          classes: [],
+          failedUsers: [],
+          failedClasses: [],
+          error: error instanceof Error ? error.message : 'Unknown error'
+        })
+        showNotification(
+          `❌ ${school.schoolPrefix}: Failed - ${error instanceof Error ? error.message : 'Unknown error'}`,
+          'error'
+        )
+      }
+    }
+
+    setBatchResults(results)
+    setIsBatchProcessing(false)
+    setProgressMessage('')
+
+    const totalSuccess = results.reduce((sum, r) => sum + (r.students?.length || 0) + (r.teachers?.length || 0), 0)
+    showNotification(
+      `🎉 Batch migration complete! Created ${totalSuccess} users across ${batchPreviewData.length} schools`,
+      'success'
+    )
+  }
+
   return {
     // State
     file,
@@ -287,6 +478,11 @@ export const useMigration = () => {
     existingClasses,
     isCheckingClasses,
     includeAdminTeacher,
+    batchResults,
+    isBatchProcessing,
+    currentSchoolIndex,
+    totalSchools,
+    batchPreviewData,
     // Actions
     setSchoolPrefix,
     setActiveTab,
@@ -297,5 +493,7 @@ export const useMigration = () => {
     handleProcessFile,
     handleCreateUsers,
     setIncludeAdminTeacher,
+    handleProcessBatch,
+    handleCreateBatch,
   }
 }

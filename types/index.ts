@@ -64,7 +64,7 @@ export interface NotificationProps {
 }
 
 // Tab and state types
-export type TabType = 'upload' | 'preview' | 'results'
+export type TabType = 'upload' | 'preview' | 'results' | 'batch-upload' | 'batch-preview' | 'batch-results'
 
 export interface NotificationState {
   message: string

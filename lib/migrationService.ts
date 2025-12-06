@@ -122,6 +122,13 @@ export class MigrationService {
   }
 
   private async loginAdmin(): Promise<void> {
+    // Skip if already logged in (cache for reused instances)
+    if (this.adminToken && this.adminClient) {
+      console.log('✓ Admin already logged in, reusing token')
+      return
+    }
+
+    console.log('🔐 Logging in as admin...')
     const response = await axios.post<LoginResult>(`${this.baseUrl}/auth/login`, {
       username: this.adminUsername,
       password: this.adminPassword
@@ -135,6 +142,8 @@ export class MigrationService {
         Authorization: `Bearer ${this.adminToken}`
       }
     })
+
+    console.log('✓ Admin login successful')
   }
 
   private async getExistingClasses(schoolPrefix: string): Promise<Map<string, string>> {

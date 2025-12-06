@@ -4,25 +4,37 @@ import { useMigration } from '@/hooks/useMigration'
 import { Button, Card, CardHeader, CardTitle, CardContent, Input, Badge } from '@/components/ui'
 import Notification from '@/components/Notification'
 import UploadTab from './UploadTab'
+import BatchUploadTab from './BatchUploadTab'
+import BatchPreviewTab from './BatchPreviewTab'
 import PreviewTab from './PreviewTab'
 import ResultsTab from './ResultsTab'
+import BatchResultsTab from './BatchResultsTab'
 import { MigrationModalProps } from '@/types'
+import { useState } from 'react'
 
 export default function MigrationModal({ isOpen, onClose }: MigrationModalProps) {
   const migration = useMigration()
+  const [mode, setMode] = useState<'single' | 'batch'>('single')
 
   if (!isOpen) return null
 
   const handleClose = () => {
     migration.resetState()
+    setMode('single')
     onClose()
   }
 
-  const tabs = [
-    { id: 'upload' as const, label: 'Upload File', icon: '📤' },
-    { id: 'preview' as const, label: 'Preview', icon: '👁', count: migration.students.length + migration.teachers.length, disabled: migration.students.length === 0 },
-    { id: 'results' as const, label: 'Results', icon: '✅', disabled: migration.createdUsers.length === 0 && migration.failedUsers.length === 0 },
-  ]
+  const tabs = mode === 'single'
+    ? [
+      { id: 'upload' as const, label: 'Upload File', icon: '📤' },
+      { id: 'preview' as const, label: 'Preview', icon: '👁', count: migration.students.length + migration.teachers.length, disabled: migration.students.length === 0 },
+      { id: 'results' as const, label: 'Results', icon: '✅', disabled: migration.createdUsers.length === 0 && migration.failedUsers.length === 0 },
+    ]
+    : [
+      { id: 'batch-upload' as const, label: 'Upload Files', icon: '📦' },
+      { id: 'batch-preview' as const, label: 'Preview', icon: '👁', disabled: migration.batchPreviewData.length === 0 },
+      { id: 'batch-results' as const, label: 'Results', icon: '✅', disabled: migration.batchResults.length === 0 },
+    ]
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -41,14 +53,37 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                 <p className="text-sm text-gray-600">Import students and teachers from Excel</p>
               </div>
             </div>
-            <button
-              onClick={handleClose}
-              className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-lg"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-3">
+              {/* Mode Switcher */}
+              <div className="flex bg-white rounded-lg p-1 border border-gray-200">
+                <button
+                  onClick={() => setMode('single')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${mode === 'single'
+                    ? 'bg-blue-500 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                >
+                  📄 Single School
+                </button>
+                <button
+                  onClick={() => setMode('batch')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${mode === 'batch'
+                    ? 'bg-blue-500 text-white shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                >
+                  📦 Multi School
+                </button>
+              </div>
+              <button
+                onClick={handleClose}
+                className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -60,17 +95,16 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                 key={tab.id}
                 onClick={() => !tab.disabled && migration.setActiveTab(tab.id)}
                 disabled={tab.disabled}
-                className={`px-6 py-4 font-semibold transition-all relative flex items-center gap-2 ${
-                  migration.activeTab === tab.id
-                    ? 'text-blue-600 bg-white rounded-t-xl shadow-sm'
-                    : tab.disabled
+                className={`px-6 py-4 font-semibold transition-all relative flex items-center gap-2 ${migration.activeTab === tab.id
+                  ? 'text-blue-600 bg-white rounded-t-xl shadow-sm'
+                  : tab.disabled
                     ? 'text-gray-400 cursor-not-allowed'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-white/50'
-                }`}
+                  }`}
               >
                 <span className="text-lg">{tab.icon}</span>
                 <span>{tab.label}</span>
-                {tab.count !== undefined && tab.count > 0 && (
+                {'count' in tab && tab.count !== undefined && tab.count > 0 && (
                   <Badge variant="info" size="sm">{tab.count}</Badge>
                 )}
                 {migration.activeTab === tab.id && (
@@ -83,9 +117,36 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-8 bg-gray-50/30">
-          {migration.activeTab === 'upload' && <UploadTab {...migration} />}
-          {migration.activeTab === 'preview' && <PreviewTab {...migration} />}
-          {migration.activeTab === 'results' && <ResultsTab {...migration} />}
+          {mode === 'single' ? (
+            <>
+              {migration.activeTab === 'upload' && <UploadTab {...migration} />}
+              {migration.activeTab === 'preview' && <PreviewTab {...migration} />}
+              {migration.activeTab === 'results' && <ResultsTab {...migration} />}
+            </>
+          ) : (
+            <>
+              {migration.activeTab === 'batch-upload' && (
+                <BatchUploadTab
+                  onSubmit={migration.handleProcessBatch}
+                  isProcessing={migration.isProcessing}
+                />
+              )}
+              {migration.activeTab === 'batch-preview' && (
+                <BatchPreviewTab
+                  schools={migration.batchPreviewData}
+                  onBack={() => migration.setActiveTab('batch-upload')}
+                  onCreate={migration.handleCreateBatch}
+                  isCreating={migration.isBatchProcessing}
+                />
+              )}
+              {migration.activeTab === 'batch-results' && (
+                <BatchResultsTab
+                  results={migration.batchResults}
+                  onClose={handleClose}
+                />
+              )}
+            </>
+          )}
         </div>
 
         {/* Footer */}
