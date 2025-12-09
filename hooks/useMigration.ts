@@ -24,6 +24,15 @@ export const useMigration = () => {
   const [isCheckingClasses, setIsCheckingClasses] = useState(false)
   const [includeAdminTeacher, setIncludeAdminTeacher] = useState(false)
 
+  // Excel configuration
+  const [excelConfig, setExcelConfig] = useState({
+    startRow: 2, // Default: row 2 (skip header)
+    fullNameColumn: 'A',
+    gradeColumn: 'B',
+    phoneNumberColumn: 'C',
+    readAllSheets: false
+  })
+
   // Subscription assignment state
   const [enableAutoSubscription, setEnableAutoSubscription] = useState(false)
   const [subscriptionId, setSubscriptionId] = useState('')
@@ -78,6 +87,13 @@ export const useMigration = () => {
     setIsAssigningPackages(false)
     setPackageAssignmentProgress(0)
     setPackageAssignmentResult(null)
+    setExcelConfig({
+      startRow: 2,
+      fullNameColumn: 'A',
+      gradeColumn: 'B',
+      phoneNumberColumn: 'C',
+      readAllSheets: false
+    })
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -140,6 +156,15 @@ export const useMigration = () => {
     }
   }
 
+  // Convert column letter to index (A=0, B=1, etc.)
+  const columnToIndex = (col: string): number => {
+    let index = 0
+    for (let i = 0; i < col.length; i++) {
+      index = index * 26 + (col.charCodeAt(i) - 64)
+    }
+    return index - 1
+  }
+
   const handleProcessFile = async () => {
     if (!file) {
       showNotification('Please select an Excel file to process', 'warning')
@@ -164,25 +189,52 @@ export const useMigration = () => {
           const data = new Uint8Array(e.target?.result as ArrayBuffer)
           const workbook = XLSX.read(data, { type: 'array' })
 
-          const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
-          const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: ['fullName', 'grade', 'phoneNumber'] })
+          // Column indices
+          const fullNameIdx = columnToIndex(excelConfig.fullNameColumn.toUpperCase())
+          const gradeIdx = columnToIndex(excelConfig.gradeColumn.toUpperCase())
+          const phoneIdx = columnToIndex(excelConfig.phoneNumberColumn.toUpperCase())
 
-          const excelRows = jsonData
-            .map((row: any) => ({
-              fullName: row.fullName?.toString().trim() || '',
-              grade: row.grade?.toString().trim() || '',
-              phoneNumber: row.phoneNumber?.toString().trim() || ''
-            }))
-            .filter(row => row.fullName && row.grade)
+          let allExcelRows: any[] = []
 
-          if (excelRows.length === 0) {
+          // Determine which sheets to read
+          const sheetsToRead = excelConfig.readAllSheets
+            ? workbook.SheetNames
+            : [workbook.SheetNames[0]]
+
+          // Read data from selected sheets
+          for (const sheetName of sheetsToRead) {
+            const sheet = workbook.Sheets[sheetName]
+
+            // Read without header, get all rows
+            const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+
+            // Skip rows before startRow and map columns
+            const sheetRows = jsonData
+              .slice(excelConfig.startRow - 1) // Convert to 0-based index
+              .map((row: any, idx: number) => {
+                if (!Array.isArray(row)) return null
+
+                return {
+                  fullName: (row[fullNameIdx]?.toString().trim() || ''),
+                  grade: (row[gradeIdx]?.toString().trim() || ''),
+                  phoneNumber: (row[phoneIdx]?.toString().trim() || ''),
+                  _sheet: sheetName,
+                  _row: excelConfig.startRow + idx
+                }
+              })
+              .filter((row: any) => row && row.fullName && row.grade)
+
+            allExcelRows = [...allExcelRows, ...sheetRows]
+          }
+
+          if (allExcelRows.length === 0) {
             showNotification('No valid data found in Excel file', 'warning')
             setIsProcessing(false)
             return
           }
 
           const processed = processExcelData(
-            excelRows,
+            allExcelRows,
             schoolPrefix.trim().toLowerCase(),
             new Set(),
             new Set(),
@@ -195,7 +247,8 @@ export const useMigration = () => {
 
           if (processed.students.length > 0) {
             setActiveTab('preview')
-            showNotification(`Found ${processed.students.length} student(s) and ${processed.teachers.length} teacher(s)`, 'success')
+            const sheetInfo = excelConfig.readAllSheets ? ` from ${sheetsToRead.length} sheet(s)` : ''
+            showNotification(`Found ${processed.students.length} student(s) and ${processed.teachers.length} teacher(s)${sheetInfo}`, 'success')
 
             // Check existing classes
             checkExistingClasses(processed.students, schoolPrefix.trim().toLowerCase())
@@ -586,7 +639,7 @@ export const useMigration = () => {
       setCurrentSchoolIndex(i + 1)
       setProgressMessage(`Migrating school ${i + 1}/${batchPreviewData.length}: ${school.schoolPrefix}`)
 
-      let packageResult: { success: number; failed: number } | null = null
+      let packageResult: { success: number; failed: number; failedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }> } | null = null
 
       try {
         const listDataStudent = school.students.map((student: any) => ({
@@ -845,6 +898,7 @@ export const useMigration = () => {
     existingClasses,
     isCheckingClasses,
     includeAdminTeacher,
+    excelConfig,
     batchResults,
     isBatchProcessing,
     currentSchoolIndex,
@@ -870,6 +924,7 @@ export const useMigration = () => {
     handleProcessFile,
     handleCreateUsers,
     setIncludeAdminTeacher,
+    setExcelConfig,
     handleProcessBatch,
     handleCreateBatch,
     retryBatchSchoolPackages,

@@ -13,6 +13,13 @@ interface UploadTabProps {
   subscriptionDescription: string
   subscriptionRequester: string
   subscriptionSource: string
+  excelConfig: {
+    startRow: number
+    fullNameColumn: string
+    gradeColumn: string
+    phoneNumberColumn: string
+    readAllSheets: boolean
+  }
   setSchoolPrefix: (prefix: string) => void
   setIncludeAdminTeacher: (include: boolean) => void
   setEnableAutoSubscription: (enable: boolean) => void
@@ -20,6 +27,13 @@ interface UploadTabProps {
   setSubscriptionDescription: (desc: string) => void
   setSubscriptionRequester: (requester: string) => void
   setSubscriptionSource: (source: string) => void
+  setExcelConfig: (config: {
+    startRow: number
+    fullNameColumn: string
+    gradeColumn: string
+    phoneNumberColumn: string
+    readAllSheets: boolean
+  }) => void
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
 }
 
@@ -33,6 +47,7 @@ export default function UploadTab({
   subscriptionDescription,
   subscriptionRequester,
   subscriptionSource,
+  excelConfig,
   setSchoolPrefix,
   setIncludeAdminTeacher,
   setEnableAutoSubscription,
@@ -40,6 +55,7 @@ export default function UploadTab({
   setSubscriptionDescription,
   setSubscriptionRequester,
   setSubscriptionSource,
+  setExcelConfig,
   handleFileChange
 }: UploadTabProps) {
   const [subscriptions, setSubscriptions] = useState<Array<{ id: string; title: string }>>([])
@@ -119,6 +135,103 @@ export default function UploadTab({
             onChange={(e) => setSchoolPrefix(e.target.value)}
             helperText="This prefix will be used to generate unique usernames"
           />
+
+          {/* Excel Configuration */}
+          <Card className="border-2 border-blue-200 overflow-hidden">
+            <div className="p-4 bg-blue-50 border-b border-blue-200">
+              <h3 className="text-sm font-semibold text-blue-900 mb-1">Excel File Configuration</h3>
+              <p className="text-xs text-blue-700">Configure how to read your Excel file</p>
+            </div>
+            <div className="p-4 bg-white space-y-4">
+              {/* Row Configuration */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Start Row <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={excelConfig.startRow}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, startRow: parseInt(e.target.value) || 1 })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none"
+                    placeholder="2"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Row where data starts (usually 2 to skip header)</p>
+                </div>
+
+                <div className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="read-all-sheets"
+                    checked={excelConfig.readAllSheets}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, readAllSheets: e.target.checked })}
+                    className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                  />
+                  <label htmlFor="read-all-sheets" className="flex-1 cursor-pointer">
+                    <div className="text-sm font-semibold text-gray-900">Read All Sheets</div>
+                    <div className="text-xs text-gray-600">Process data from all sheets in the file</div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Column Mapping */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Full Name Column <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={excelConfig.fullNameColumn}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, fullNameColumn: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none uppercase"
+                    placeholder="A"
+                    maxLength={3}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Column letter (e.g., A, B, AA)</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Grade Column <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={excelConfig.gradeColumn}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, gradeColumn: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none uppercase"
+                    placeholder="B"
+                    maxLength={3}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Column letter (e.g., A, B, AA)</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Phone Number Column
+                  </label>
+                  <input
+                    type="text"
+                    value={excelConfig.phoneNumberColumn}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, phoneNumberColumn: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none uppercase"
+                    placeholder="C"
+                    maxLength={3}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Column letter (optional)</p>
+                </div>
+              </div>
+
+              {/* Preview Example */}
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <div className="text-xs font-semibold text-gray-700 mb-2">Preview:</div>
+                <div className="text-xs text-gray-600 font-mono">
+                  Row {excelConfig.startRow}: {excelConfig.fullNameColumn}="Nguyen Van A", {excelConfig.gradeColumn}="10A", {excelConfig.phoneNumberColumn}="0123456789"
+                </div>
+              </div>
+            </div>
+          </Card>
 
           {/* Admin Teacher Checkbox */}
           <div className="flex items-start gap-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">

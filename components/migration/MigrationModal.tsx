@@ -130,6 +130,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                   subscriptionDescription={migration.subscriptionDescription}
                   subscriptionRequester={migration.subscriptionRequester}
                   subscriptionSource={migration.subscriptionSource}
+                  excelConfig={migration.excelConfig}
                   setSchoolPrefix={migration.setSchoolPrefix}
                   setIncludeAdminTeacher={migration.setIncludeAdminTeacher}
                   setEnableAutoSubscription={migration.setEnableAutoSubscription}
@@ -137,6 +138,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                   setSubscriptionDescription={migration.setSubscriptionDescription}
                   setSubscriptionRequester={migration.setSubscriptionRequester}
                   setSubscriptionSource={migration.setSubscriptionSource}
+                  setExcelConfig={migration.setExcelConfig}
                   handleFileChange={migration.handleFileChange}
                 />
               )}

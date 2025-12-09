@@ -58,10 +58,47 @@ interface MigrationResult {
 const MIN_LENGTH_DISPLAY_NAME = 2
 const MAX_LENGTH_DISPLAY_NAME = 20
 
-// Batch processing configuration
-// Note: Registration runs sequentially (1 thread) to avoid server spam prevention
-const INIT_BATCH_SIZE = 5 // Number of users to initialize concurrently in Phase 2
+// Rate limiting configuration
+const REGISTER_RATE = 2 // 2 requests/second for register API
+const LOGIN_RATE = 2 // 2 requests/second for login API
 const MAX_CONCURRENT_GROUPS = 5 // Maximum number of display name groups to process in parallel
+
+/**
+ * Throttled dispatcher for rate-limited parallel request dispatching.
+ * Ensures minimum interval between request sends (not responses).
+ */
+class ThrottledDispatcher {
+  private minInterval: number
+  private lastSendTime: number = 0
+  private name: string
+  private pendingPromise: Promise<void> = Promise.resolve()
+
+  constructor(name: string, requestsPerSecond: number) {
+    this.name = name
+    this.minInterval = 1000 / requestsPerSecond // 2 req/s = 500ms interval
+  }
+
+  async dispatch<T>(fn: () => Promise<T>): Promise<T> {
+    // Queue requests to ensure proper spacing
+    const execute = this.pendingPromise.then(async () => {
+      const now = Date.now()
+      const elapsed = now - this.lastSendTime
+      const waitTime = Math.max(0, this.minInterval - elapsed)
+
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime))
+      }
+
+      this.lastSendTime = Date.now()
+    })
+
+    this.pendingPromise = execute
+    await execute
+
+    // Send request immediately after throttle, don't wait for response
+    return fn()
+  }
+}
 
 export class MigrationService {
   private baseUrl: string
@@ -645,20 +682,76 @@ export class MigrationService {
       (teacher as any).originalIndex = students.length + index
     })
 
-    // ===== PHASE 1: USER REGISTRATION (Sequential - to avoid spam prevention) =====
-    console.log(`\n${getTimestamp()} ========== PHASE 1: USER REGISTRATION (Sequential) ==========`)
+    // ===== PHASE 1: USER REGISTRATION (Parallel with Rate Limiting) =====
+    console.log(`\n${getTimestamp()} ========== PHASE 1: USER REGISTRATION (Parallel, ${REGISTER_RATE} reg/s, ${LOGIN_RATE} login/s) ==========`)
     const allUsers = [...students, ...teachersToCreate]
-    console.log(`${getTimestamp()} Processing ${allUsers.length} user registrations sequentially to avoid spam prevention`)
+    console.log(`${getTimestamp()} Processing ${allUsers.length} user registrations with throttled parallel dispatch`)
 
-    let processedRegistrations = 0
-    // Process users one by one sequentially
-    for (const user of allUsers) {
-      await this.registerUserAccount(user, listUserError)
-      processedRegistrations++
-      console.log(`${getTimestamp()} [Registration] ${processedRegistrations}/${allUsers.length} - Registered: ${user.actualUserName || user.username}`)
-    }
+    // Create throttled dispatchers for each endpoint
+    const registerDispatcher = new ThrottledDispatcher('Register', REGISTER_RATE)
+    const loginDispatcher = new ThrottledDispatcher('Login', LOGIN_RATE)
 
-    console.log(`${getTimestamp()} Phase 1 complete: ${processedRegistrations} registrations processed, ${listUserError.length} failed`)
+    let completedRegistrations = 0
+
+    // Dispatch all registrations with throttling, collect promises
+    const registrationPromises = allUsers.map(async (user) => {
+      try {
+        // Check existing usernames first (uses admin client, not rate limited)
+        const existingUsernames = await this.getExistingUsernames(user.username)
+        let tempIdx = 0
+        let finalUsername = user.username
+        while (existingUsernames.has(finalUsername.toLowerCase())) {
+          tempIdx++
+          finalUsername = `${user.username}${tempIdx}`
+        }
+        user.username = finalUsername
+
+        // Throttle the SEND only, responses complete in parallel
+        const registerResult = await registerDispatcher.dispatch(() =>
+          this.registerUser(user.username, user.password)
+        )
+
+        if (!registerResult.success) {
+          user.reason = registerResult.error || 'Registration failed'
+          listUserError.push({ ...user })
+          completedRegistrations++
+          console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - FAILED: ${user.username}`)
+          return
+        }
+
+        user.actualUserName = registerResult.actualUsername!
+
+        // Throttle login call separately
+        const loginResult = await loginDispatcher.dispatch(() =>
+          this.loginUser(user.actualUserName!, user.password)
+        )
+
+        if (!loginResult) {
+          user.reason = 'Login failed after registration'
+          listUserError.push({ ...user })
+          completedRegistrations++
+          console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - LOGIN FAILED: ${user.actualUserName}`)
+          return
+        }
+
+        user.id = loginResult.userId
+        user.accessToken = loginResult.accessToken
+        user.loginDisplayName = loginResult.displayName
+
+        completedRegistrations++
+        console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - OK: ${user.actualUserName}`)
+      } catch (error: any) {
+        user.reason = error.message || 'Unknown error'
+        listUserError.push({ ...user })
+        completedRegistrations++
+        console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - ERROR: ${user.username} - ${error.message}`)
+      }
+    })
+
+    // Wait for all registrations to complete
+    await Promise.all(registrationPromises)
+
+    console.log(`${getTimestamp()} Phase 1 complete: ${completedRegistrations} registrations processed, ${listUserError.length} failed`)
 
     // ===== PHASE 2: CHARACTER INITIALIZATION (Grouped by Display Name) =====
     console.log(`\n${getTimestamp()} ========== PHASE 2: CHARACTER INITIALIZATION ==========`)

@@ -300,7 +300,7 @@ export default function BatchResultsTab({ results, onClose, retryBatchSchoolPack
                                                 {result.packageAssignment.failed > 0 && retryBatchSchoolPackages && (
                                                     <Button
                                                         onClick={() => retryBatchSchoolPackages(index)}
-                                                        variant="warning"
+                                                        variant="secondary"
                                                         size="sm"
                                                         disabled={retryingSchoolIndex === index}
                                                         loading={retryingSchoolIndex === index}

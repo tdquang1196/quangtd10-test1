@@ -422,7 +422,7 @@ export default function ResultsTab({
               {packageAssignmentResult.failed > 0 && retryFailedPackages && (
                 <Button
                   onClick={retryFailedPackages}
-                  variant="warning"
+                  variant="secondary"
                   size="sm"
                   disabled={isAssigningPackages}
                   icon={
