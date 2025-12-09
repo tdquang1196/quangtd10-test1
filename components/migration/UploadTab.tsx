@@ -1,12 +1,25 @@
 import { Card, CardContent, Input } from '@/components/ui'
+import { useState, useEffect } from 'react'
+import { getSubscriptions } from '@/lib/api/users'
+import { PACKAGE_SOURCE_OPTIONS } from '@/constants/package-source'
 
 interface UploadTabProps {
   file: File | null
   schoolPrefix: string
   errors: Array<{ row: number; message: string }>
   includeAdminTeacher: boolean
+  enableAutoSubscription: boolean
+  subscriptionId: string
+  subscriptionDescription: string
+  subscriptionRequester: string
+  subscriptionSource: string
   setSchoolPrefix: (prefix: string) => void
   setIncludeAdminTeacher: (include: boolean) => void
+  setEnableAutoSubscription: (enable: boolean) => void
+  setSubscriptionId: (id: string) => void
+  setSubscriptionDescription: (desc: string) => void
+  setSubscriptionRequester: (requester: string) => void
+  setSubscriptionSource: (source: string) => void
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
 }
 
@@ -15,10 +28,47 @@ export default function UploadTab({
   schoolPrefix,
   errors,
   includeAdminTeacher,
+  enableAutoSubscription,
+  subscriptionId,
+  subscriptionDescription,
+  subscriptionRequester,
+  subscriptionSource,
   setSchoolPrefix,
   setIncludeAdminTeacher,
+  setEnableAutoSubscription,
+  setSubscriptionId,
+  setSubscriptionDescription,
+  setSubscriptionRequester,
+  setSubscriptionSource,
   handleFileChange
 }: UploadTabProps) {
+  const [subscriptions, setSubscriptions] = useState<Array<{ id: string; title: string }>>([])
+  const [isLoadingSubscriptions, setIsLoadingSubscriptions] = useState(false)
+
+  // Fetch subscriptions on mount
+  useEffect(() => {
+    const fetchSubscriptions = async () => {
+      setIsLoadingSubscriptions(true)
+      try {
+        const response = await getSubscriptions()
+        if (response?.data?.subcriptions) {
+          setSubscriptions(
+            response.data.subcriptions.map((sub: any) => ({
+              id: sub.id,
+              title: sub.title
+            }))
+          )
+        }
+      } catch (error) {
+        console.error('Failed to fetch subscriptions:', error)
+      } finally {
+        setIsLoadingSubscriptions(false)
+      }
+    }
+
+    fetchSubscriptions()
+  }, [])
+
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Instructions */}
@@ -87,6 +137,103 @@ export default function UploadTab({
                 Create a general teacher account (e.g., <span className="font-mono font-semibold">hytklttgv</span>) that will be added to all classes
               </div>
             </label>
+          </div>
+
+          {/* Auto Subscription Assignment */}
+          <div className="border-2 border-green-200 rounded-lg overflow-hidden">
+            <div className="flex items-start gap-3 p-4 bg-green-50">
+              <input
+                type="checkbox"
+                id="auto-subscription-checkbox"
+                checked={enableAutoSubscription}
+                onChange={(e) => setEnableAutoSubscription(e.target.checked)}
+                className="mt-1 w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500 cursor-pointer"
+              />
+              <label htmlFor="auto-subscription-checkbox" className="flex-1 cursor-pointer">
+                <div className="text-sm font-semibold text-green-900 mb-1">
+                  Auto-Assign Subscription Packages
+                </div>
+                <div className="text-xs text-green-700">
+                  Automatically assign subscription packages to students after migration completes
+                </div>
+              </label>
+            </div>
+
+            {/* Subscription Details (shown when enabled) */}
+            {enableAutoSubscription && (
+              <div className="p-4 bg-white space-y-4 border-t border-green-200">
+                {/* Subscription Package */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Subscription Package <span className="text-red-600">*</span>
+                  </label>
+                  {isLoadingSubscriptions ? (
+                    <div className="w-full px-4 py-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 text-sm">
+                      Loading subscriptions...
+                    </div>
+                  ) : subscriptions.length === 0 ? (
+                    <div className="w-full px-4 py-3 border border-red-200 rounded-lg bg-red-50 text-red-600 text-sm">
+                      No subscriptions available
+                    </div>
+                  ) : (
+                    <select
+                      value={subscriptionId}
+                      onChange={(e) => setSubscriptionId(e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none bg-white"
+                    >
+                      <option value="">Select a subscription package</option>
+                      {subscriptions.map(sub => (
+                        <option key={sub.id} value={sub.id}>{sub.title}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Description
+                  </label>
+                  <input
+                    type="text"
+                    value={subscriptionDescription}
+                    onChange={(e) => setSubscriptionDescription(e.target.value)}
+                    placeholder="e.g., Migration batch 2025-12-09"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none"
+                  />
+                </div>
+
+                {/* Requester */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Requester
+                  </label>
+                  <input
+                    type="text"
+                    value={subscriptionRequester}
+                    onChange={(e) => setSubscriptionRequester(e.target.value)}
+                    placeholder="Your name"
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none"
+                  />
+                </div>
+
+                {/* Source */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Package Source <span className="text-red-600">*</span>
+                  </label>
+                  <select
+                    value={subscriptionSource}
+                    onChange={(e) => setSubscriptionSource(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none bg-white"
+                  >
+                    {PACKAGE_SOURCE_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>

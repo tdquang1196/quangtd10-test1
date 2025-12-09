@@ -1,7 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button, Input, Card } from '@/components/ui'
+import { getSubscriptions } from '@/lib/api/users'
+import { PACKAGE_SOURCE_OPTIONS } from '@/constants/package-source'
 
 interface SchoolForm {
     id: string
@@ -10,8 +12,16 @@ interface SchoolForm {
     createAdminTeacher: boolean
 }
 
+interface BatchSubscriptionConfig {
+    enabled: boolean
+    subscriptionId: string
+    description: string
+    requester: string
+    source: string
+}
+
 interface BatchUploadTabProps {
-    onSubmit: (schools: SchoolForm[]) => void
+    onSubmit: (schools: SchoolForm[], subscriptionConfig: BatchSubscriptionConfig) => void
     isProcessing: boolean
 }
 
@@ -19,6 +29,43 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
     const [schools, setSchools] = useState<SchoolForm[]>([
         { id: crypto.randomUUID(), file: null, schoolPrefix: '', createAdminTeacher: true }
     ])
+
+    // Subscription configuration
+    const [subscriptionConfig, setSubscriptionConfig] = useState<BatchSubscriptionConfig>({
+        enabled: false,
+        subscriptionId: '',
+        description: '',
+        requester: '',
+        source: '4' // Default: TRIAL_GIVE
+    })
+
+    // Subscriptions
+    const [subscriptions, setSubscriptions] = useState<Array<{ id: string; title: string }>>([])
+    const [isLoadingSubscriptions, setIsLoadingSubscriptions] = useState(false)
+
+    // Fetch subscriptions on mount
+    useEffect(() => {
+        const fetchSubscriptions = async () => {
+            setIsLoadingSubscriptions(true)
+            try {
+                const response = await getSubscriptions()
+                if (response?.data?.subcriptions) {
+                    setSubscriptions(
+                        response.data.subcriptions.map((sub: any) => ({
+                            id: sub.id,
+                            title: sub.title
+                        }))
+                    )
+                }
+            } catch (error) {
+                console.error('Failed to fetch subscriptions:', error)
+            } finally {
+                setIsLoadingSubscriptions(false)
+            }
+        }
+
+        fetchSubscriptions()
+    }, [])
 
     const addSchool = () => {
         setSchools([...schools, {
@@ -157,6 +204,102 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                 ))}
             </div>
 
+            {/* Batch Subscription Configuration */}
+            <Card className="border-2 border-green-200 overflow-hidden">
+                <div className="flex items-start gap-3 p-4 bg-green-50">
+                    <input
+                        type="checkbox"
+                        id="batch-auto-subscription"
+                        checked={subscriptionConfig.enabled}
+                        onChange={(e) => setSubscriptionConfig({ ...subscriptionConfig, enabled: e.target.checked })}
+                        className="mt-1 w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500 cursor-pointer"
+                    />
+                    <label htmlFor="batch-auto-subscription" className="flex-1 cursor-pointer">
+                        <div className="text-sm font-semibold text-green-900 mb-1">
+                            Auto-Assign Subscription Packages (All Schools)
+                        </div>
+                        <div className="text-xs text-green-700">
+                            Automatically assign subscription packages to all students after each school migration completes
+                        </div>
+                    </label>
+                </div>
+
+                {subscriptionConfig.enabled && (
+                    <div className="p-4 bg-white space-y-4 border-t border-green-200">
+                        {/* Subscription Package */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-900 mb-1">
+                                Subscription Package <span className="text-red-600">*</span>
+                            </label>
+                            {isLoadingSubscriptions ? (
+                                <div className="w-full px-4 py-3 border border-gray-200 rounded-lg bg-gray-50 text-gray-500 text-sm">
+                                    Loading subscriptions...
+                                </div>
+                            ) : subscriptions.length === 0 ? (
+                                <div className="w-full px-4 py-3 border border-red-200 rounded-lg bg-red-50 text-red-600 text-sm">
+                                    No subscriptions available
+                                </div>
+                            ) : (
+                                <select
+                                    value={subscriptionConfig.subscriptionId}
+                                    onChange={(e) => setSubscriptionConfig({ ...subscriptionConfig, subscriptionId: e.target.value })}
+                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none bg-white"
+                                >
+                                    <option value="">Select a subscription package</option>
+                                    {subscriptions.map(sub => (
+                                        <option key={sub.id} value={sub.id}>{sub.title}</option>
+                                    ))}
+                                </select>
+                            )}
+                        </div>
+
+                        {/* Description */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-900 mb-1">
+                                Description
+                            </label>
+                            <input
+                                type="text"
+                                value={subscriptionConfig.description}
+                                onChange={(e) => setSubscriptionConfig({ ...subscriptionConfig, description: e.target.value })}
+                                placeholder="e.g., Batch migration 2025-12-09"
+                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none"
+                            />
+                        </div>
+
+                        {/* Requester */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-900 mb-1">
+                                Requester
+                            </label>
+                            <input
+                                type="text"
+                                value={subscriptionConfig.requester}
+                                onChange={(e) => setSubscriptionConfig({ ...subscriptionConfig, requester: e.target.value })}
+                                placeholder="Your name"
+                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none"
+                            />
+                        </div>
+
+                        {/* Source */}
+                        <div>
+                            <label className="block text-sm font-medium text-gray-900 mb-1">
+                                Package Source <span className="text-red-600">*</span>
+                            </label>
+                            <select
+                                value={subscriptionConfig.source}
+                                onChange={(e) => setSubscriptionConfig({ ...subscriptionConfig, source: e.target.value })}
+                                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none bg-white"
+                            >
+                                {PACKAGE_SOURCE_OPTIONS.map(option => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                )}
+            </Card>
+
             {/* Summary */}
             <div className="flex items-center justify-between p-4 bg-blue-50 border border-blue-200 rounded-xl">
                 <div className="flex items-center gap-3">
@@ -173,7 +316,7 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                     </div>
                 </div>
                 <Button
-                    onClick={() => onSubmit(schools)}
+                    onClick={() => onSubmit(schools, subscriptionConfig)}
                     disabled={!isValid || isProcessing}
                     loading={isProcessing}
                     size="lg"

@@ -10,14 +10,21 @@ interface SchoolResult {
     classes: any[]
     failedUsers: any[]
     failedClasses: any[]
+    packageAssignment?: {
+        success: number
+        failed: number
+        failedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }>
+    } | null
 }
 
 interface BatchResultsTabProps {
     results: SchoolResult[]
     onClose: () => void
+    retryBatchSchoolPackages?: (schoolIndex: number) => Promise<void>
+    retryingSchoolIndex?: number | null
 }
 
-export default function BatchResultsTab({ results, onClose }: BatchResultsTabProps) {
+export default function BatchResultsTab({ results, onClose, retryBatchSchoolPackages, retryingSchoolIndex }: BatchResultsTabProps) {
     const [expandedSchools, setExpandedSchools] = useState<Set<string>>(new Set(results.map(r => r.schoolPrefix)))
 
     const toggleSchool = (prefix: string) => {
@@ -54,7 +61,7 @@ export default function BatchResultsTab({ results, onClose }: BatchResultsTabPro
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div className="bg-white rounded-lg p-4 border border-green-200">
                         <p className="text-sm text-gray-600 mb-1">Total Students</p>
                         <p className="text-3xl font-bold text-green-600">{getAllStudents().length}</p>
@@ -66,6 +73,12 @@ export default function BatchResultsTab({ results, onClose }: BatchResultsTabPro
                     <div className="bg-white rounded-lg p-4 border border-purple-200">
                         <p className="text-sm text-gray-600 mb-1">Total Classes</p>
                         <p className="text-3xl font-bold text-purple-600">{results.reduce((sum, r) => sum + r.classes.length, 0)}</p>
+                    </div>
+                    <div className="bg-white rounded-lg p-4 border border-orange-200">
+                        <p className="text-sm text-gray-600 mb-1">Packages Assigned</p>
+                        <p className="text-3xl font-bold text-orange-600">
+                            {results.reduce((sum, r) => sum + (r.packageAssignment?.success || 0), 0)}
+                        </p>
                     </div>
                     <div className="bg-white rounded-lg p-4 border border-red-200">
                         <p className="text-sm text-gray-600 mb-1">Total Errors</p>
@@ -116,6 +129,12 @@ export default function BatchResultsTab({ results, onClose }: BatchResultsTabPro
                                             <h4 className="text-lg font-bold text-gray-900">{result.schoolPrefix}</h4>
                                             <p className="text-sm text-gray-600">
                                                 {totalUsers} users • {result.classes.length} classes
+                                                {result.packageAssignment && (
+                                                    <span className="text-orange-600">
+                                                        {' '}• {result.packageAssignment.success} packages
+                                                        {result.packageAssignment.failed > 0 && ` (${result.packageAssignment.failed} failed)`}
+                                                    </span>
+                                                )}
                                                 {totalErrors > 0 && <span className="text-red-600"> • {totalErrors} errors</span>}
                                             </p>
                                         </div>
@@ -255,6 +274,71 @@ export default function BatchResultsTab({ results, onClose }: BatchResultsTabPro
                                             ))}
                                         </div>
                                     </div>
+
+                                    {/* Package Assignment Status */}
+                                    {result.packageAssignment && (
+                                        <div className={`p-4 rounded-lg border-2 ${result.packageAssignment.failed === 0 ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${result.packageAssignment.failed === 0 ? 'bg-green-500' : 'bg-orange-500'}`}>
+                                                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        {result.packageAssignment.failed === 0 ? (
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                        ) : (
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                        )}
+                                                    </svg>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <h5 className={`font-semibold ${result.packageAssignment.failed === 0 ? 'text-green-900' : 'text-orange-900'}`}>
+                                                        {result.packageAssignment.failed === 0 ? '📦 All Packages Assigned Successfully' : '📦 Package Assignment Completed with Errors'}
+                                                    </h5>
+                                                    <p className={`text-sm ${result.packageAssignment.failed === 0 ? 'text-green-700' : 'text-orange-700'}`}>
+                                                        Success: {result.packageAssignment.success} students
+                                                        {result.packageAssignment.failed > 0 && ` | Failed: ${result.packageAssignment.failed} students`}
+                                                    </p>
+                                                </div>
+                                                {result.packageAssignment.failed > 0 && retryBatchSchoolPackages && (
+                                                    <Button
+                                                        onClick={() => retryBatchSchoolPackages(index)}
+                                                        variant="warning"
+                                                        size="sm"
+                                                        disabled={retryingSchoolIndex === index}
+                                                        loading={retryingSchoolIndex === index}
+                                                    >
+                                                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                        </svg>
+                                                        Retry ({result.packageAssignment.failed})
+                                                    </Button>
+                                                )}
+                                            </div>
+
+                                            {/* Failed Users List */}
+                                            {result.packageAssignment.failed > 0 && result.packageAssignment.failedUsers && result.packageAssignment.failedUsers.length > 0 && (
+                                                <div className="mt-4 border-t border-orange-200 pt-4">
+                                                    <h6 className="text-xs font-semibold text-orange-900 mb-2">Failed Assignments:</h6>
+                                                    <div className="bg-white rounded border border-orange-200 max-h-32 overflow-auto">
+                                                        <table className="w-full text-xs">
+                                                            <thead className="bg-orange-50 sticky top-0">
+                                                                <tr>
+                                                                    <th className="px-2 py-1 text-left font-semibold text-gray-700">Username</th>
+                                                                    <th className="px-2 py-1 text-left font-semibold text-gray-700">Error</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {result.packageAssignment.failedUsers.map((user, i) => (
+                                                                    <tr key={i} className="border-t border-orange-100">
+                                                                        <td className="px-2 py-1 font-mono text-gray-700">{user.username || user.userId}</td>
+                                                                        <td className="px-2 py-1 text-red-600">{user.error}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
 
                                     {/* Errors */}
                                     {totalErrors > 0 && (

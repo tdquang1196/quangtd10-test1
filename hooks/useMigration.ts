@@ -3,6 +3,7 @@ import axios from 'axios'
 import * as XLSX from 'xlsx'
 import { processExcelData } from '@/utils/bulkRegistrationUtils'
 import { StudentData, TeacherData, MigrationResult, NotificationState, TabType } from '@/types'
+import { givePackageToUser } from '@/lib/api/users'
 
 export const useMigration = () => {
   const [file, setFile] = useState<File | null>(null)
@@ -23,12 +24,34 @@ export const useMigration = () => {
   const [isCheckingClasses, setIsCheckingClasses] = useState(false)
   const [includeAdminTeacher, setIncludeAdminTeacher] = useState(false)
 
+  // Subscription assignment state
+  const [enableAutoSubscription, setEnableAutoSubscription] = useState(false)
+  const [subscriptionId, setSubscriptionId] = useState('')
+  const [subscriptionDescription, setSubscriptionDescription] = useState('')
+  const [subscriptionRequester, setSubscriptionRequester] = useState('')
+  const [subscriptionSource, setSubscriptionSource] = useState('4') // Default: TRIAL_GIVE
+  const [isAssigningPackages, setIsAssigningPackages] = useState(false)
+  const [packageAssignmentProgress, setPackageAssignmentProgress] = useState(0)
+  const [packageAssignmentResult, setPackageAssignmentResult] = useState<{
+    success: number
+    failed: number
+    failedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }>
+  } | null>(null)
+
   // Batch migration state
   const [batchResults, setBatchResults] = useState<any[]>([])
   const [isBatchProcessing, setIsBatchProcessing] = useState(false)
   const [currentSchoolIndex, setCurrentSchoolIndex] = useState(0)
   const [totalSchools, setTotalSchools] = useState(0)
   const [batchPreviewData, setBatchPreviewData] = useState<any[]>([])
+  const [batchSubscriptionConfig, setBatchSubscriptionConfig] = useState<{
+    enabled: boolean
+    subscriptionId: string
+    description: string
+    requester: string
+    source: string
+  } | null>(null)
+  const [retryingSchoolIndex, setRetryingSchoolIndex] = useState<number | null>(null)
 
   const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setNotification({ message, type })
@@ -47,6 +70,14 @@ export const useMigration = () => {
     setResult(null)
     setActiveTab('upload')
     setIncludeAdminTeacher(false)
+    setEnableAutoSubscription(false)
+    setSubscriptionId('')
+    setSubscriptionDescription('')
+    setSubscriptionRequester('')
+    setSubscriptionSource('4')
+    setIsAssigningPackages(false)
+    setPackageAssignmentProgress(0)
+    setPackageAssignmentResult(null)
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,6 +222,158 @@ export const useMigration = () => {
     }
   }
 
+  // Auto-assign packages to successfully migrated students
+  const assignPackagesToStudents = async (students: any[]) => {
+    if (!enableAutoSubscription || !subscriptionId || students.length === 0) {
+      return
+    }
+
+    setIsAssigningPackages(true)
+    setPackageAssignmentProgress(0)
+    setProgressMessage(`Assigning subscription packages to ${students.length} students...`)
+
+    const BATCH_SIZE = 5
+    const BATCH_DELAY_MS = 300
+    let successCount = 0
+    const failedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }> = []
+
+    try {
+      // Split into batches
+      const batches: any[][] = []
+      for (let i = 0; i < students.length; i += BATCH_SIZE) {
+        batches.push(students.slice(i, i + BATCH_SIZE))
+      }
+
+      // Process batches
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex]
+
+        // Parallel requests within batch
+        const results = await Promise.allSettled(
+          batch.map((student) =>
+            givePackageToUser({
+              subscriptionId: subscriptionId,
+              userId: student.id,
+              description: subscriptionDescription || `Migration batch ${new Date().toISOString().split('T')[0]}`,
+              source: parseInt(subscriptionSource),
+              requester: subscriptionRequester || 'Migration Tool',
+            })
+          )
+        )
+
+        // Process results
+        results.forEach((result, idx) => {
+          const student = batch[idx]
+          if (result.status === 'fulfilled') {
+            successCount++
+          } else {
+            const errorMsg = result.reason?.response?.data?.message || result.reason?.message || 'Unknown error'
+            failedUsers.push({
+              userId: student.id,
+              username: student.actualUserName || student.username,
+              displayName: student.displayName,
+              error: errorMsg
+            })
+          }
+        })
+
+        // Update progress
+        const processedCount = (batchIndex + 1) * BATCH_SIZE
+        setPackageAssignmentProgress((Math.min(processedCount, students.length) / students.length) * 100)
+
+        // Delay between batches
+        if (batchIndex < batches.length - 1) {
+          await new Promise((r) => setTimeout(r, BATCH_DELAY_MS))
+        }
+      }
+
+      setPackageAssignmentResult({ success: successCount, failed: failedUsers.length, failedUsers })
+
+      if (failedUsers.length === 0) {
+        showNotification(`Successfully assigned packages to all ${successCount} students`, 'success')
+      } else {
+        showNotification(`Assigned: ${successCount}, Failed: ${failedUsers.length}`, 'warning')
+      }
+    } catch (error) {
+      console.error('Package assignment error:', error)
+      showNotification('Failed to assign packages', 'error')
+    } finally {
+      setIsAssigningPackages(false)
+      setProgressMessage('')
+    }
+  }
+
+  // Retry failed package assignments (single school)
+  const retryFailedPackages = async () => {
+    if (!packageAssignmentResult?.failedUsers.length || !subscriptionId) {
+      return
+    }
+
+    setIsAssigningPackages(true)
+    setPackageAssignmentProgress(0)
+    setProgressMessage(`Retrying ${packageAssignmentResult.failedUsers.length} failed package assignments...`)
+
+    const BATCH_SIZE = 5
+    const BATCH_DELAY_MS = 300
+    let successCount = packageAssignmentResult.success
+    const stillFailedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }> = []
+
+    try {
+      const usersToRetry = packageAssignmentResult.failedUsers
+      const batches: any[][] = []
+      for (let i = 0; i < usersToRetry.length; i += BATCH_SIZE) {
+        batches.push(usersToRetry.slice(i, i + BATCH_SIZE))
+      }
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex]
+
+        const results = await Promise.allSettled(
+          batch.map((user) =>
+            givePackageToUser({
+              subscriptionId: subscriptionId,
+              userId: user.userId,
+              description: subscriptionDescription || `Migration batch ${new Date().toISOString().split('T')[0]}`,
+              source: parseInt(subscriptionSource),
+              requester: subscriptionRequester || 'Migration Tool',
+            })
+          )
+        )
+
+        results.forEach((result, idx) => {
+          const user = batch[idx]
+          if (result.status === 'fulfilled') {
+            successCount++
+          } else {
+            const errorMsg = result.reason?.response?.data?.message || result.reason?.message || 'Unknown error'
+            stillFailedUsers.push({ ...user, error: errorMsg })
+          }
+        })
+
+        const processedCount = (batchIndex + 1) * BATCH_SIZE
+        setPackageAssignmentProgress((Math.min(processedCount, usersToRetry.length) / usersToRetry.length) * 100)
+
+        if (batchIndex < batches.length - 1) {
+          await new Promise((r) => setTimeout(r, BATCH_DELAY_MS))
+        }
+      }
+
+      setPackageAssignmentResult({ success: successCount, failed: stillFailedUsers.length, failedUsers: stillFailedUsers })
+
+      if (stillFailedUsers.length === 0) {
+        showNotification(`Successfully retried all failed assignments!`, 'success')
+      } else {
+        showNotification(`Retry: ${successCount - packageAssignmentResult.success} succeeded, ${stillFailedUsers.length} still failed`, 'warning')
+      }
+    } catch (error) {
+      console.error('Retry error:', error)
+      showNotification('Failed to retry package assignments', 'error')
+    } finally {
+      setIsAssigningPackages(false)
+      setProgressMessage('')
+    }
+  }
+
   const handleCreateUsers = async () => {
     if (students.length === 0 && teachers.length === 0) {
       showNotification('Please process an Excel file first', 'warning')
@@ -273,6 +456,14 @@ export const useMigration = () => {
 
       const message = `Created ${successCount} users, ${apiResult.ListDataClasses?.length || 0} classes. ${failCount > 0 ? `${failCount} users failed.` : ''} ${classErrorCount > 0 ? `${classErrorCount} classes failed.` : ''}`
       showNotification(message, successCount > 0 ? 'success' : 'error')
+
+      // Auto-assign packages to successfully created students
+      if (enableAutoSubscription && successCount > 0) {
+        const successfulStudents = apiResult.ListDataStudent?.filter((s: any) => s.id) || []
+        if (successfulStudents.length > 0) {
+          await assignPackagesToStudents(successfulStudents)
+        }
+      }
     } catch (error) {
       console.error('Migration error:', error)
       setIsCreating(false)
@@ -281,12 +472,25 @@ export const useMigration = () => {
   }
 
   // Process batch files and show preview
-  const handleProcessBatch = async (schools: Array<{
-    id: string
-    file: File | null
-    schoolPrefix: string
-    createAdminTeacher: boolean
-  }>) => {
+  const handleProcessBatch = async (
+    schools: Array<{
+      id: string
+      file: File | null
+      schoolPrefix: string
+      createAdminTeacher: boolean
+    }>,
+    subscriptionConfig?: {
+      enabled: boolean
+      subscriptionId: string
+      description: string
+      requester: string
+      source: string
+    }
+  ) => {
+    // Save subscription config for batch processing
+    if (subscriptionConfig) {
+      setBatchSubscriptionConfig(subscriptionConfig)
+    }
     setIsProcessing(true)
     setBatchPreviewData([])
 
@@ -382,6 +586,8 @@ export const useMigration = () => {
       setCurrentSchoolIndex(i + 1)
       setProgressMessage(`Migrating school ${i + 1}/${batchPreviewData.length}: ${school.schoolPrefix}`)
 
+      let packageResult: { success: number; failed: number } | null = null
+
       try {
         const listDataStudent = school.students.map((student: any) => ({
           username: student.username,
@@ -427,19 +633,86 @@ export const useMigration = () => {
 
         const apiResult = response.data
 
+        // Auto-assign packages if enabled
+        if (batchSubscriptionConfig?.enabled && batchSubscriptionConfig.subscriptionId) {
+          const successfulStudents = apiResult.ListDataStudent?.filter((s: any) => s.id) || []
+          if (successfulStudents.length > 0) {
+            setProgressMessage(`Assigning packages to ${successfulStudents.length} students in ${school.schoolPrefix}...`)
+
+            const BATCH_SIZE = 5
+            const BATCH_DELAY_MS = 300
+            let successCount = 0
+            const failedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }> = []
+
+            try {
+              // Split into batches
+              const batches: any[][] = []
+              for (let j = 0; j < successfulStudents.length; j += BATCH_SIZE) {
+                batches.push(successfulStudents.slice(j, j + BATCH_SIZE))
+              }
+
+              // Process batches
+              for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+                const batch = batches[batchIndex]
+
+                const batchResults = await Promise.allSettled(
+                  batch.map((student: any) =>
+                    givePackageToUser({
+                      subscriptionId: batchSubscriptionConfig.subscriptionId,
+                      userId: student.id,
+                      description: batchSubscriptionConfig.description || `Batch migration ${new Date().toISOString().split('T')[0]}`,
+                      source: parseInt(batchSubscriptionConfig.source),
+                      requester: batchSubscriptionConfig.requester || 'Migration Tool',
+                    })
+                  )
+                )
+
+                batchResults.forEach((result, idx) => {
+                  const student = batch[idx]
+                  if (result.status === 'fulfilled') {
+                    successCount++
+                  } else {
+                    const errorMsg = result.reason?.response?.data?.message || result.reason?.message || 'Unknown error'
+                    failedUsers.push({
+                      userId: student.id,
+                      username: student.actualUserName || student.username,
+                      displayName: student.displayName,
+                      error: errorMsg
+                    })
+                  }
+                })
+
+                if (batchIndex < batches.length - 1) {
+                  await new Promise((r) => setTimeout(r, BATCH_DELAY_MS))
+                }
+              }
+
+              packageResult = { success: successCount, failed: failedUsers.length, failedUsers }
+            } catch (error) {
+              console.error(`Package assignment error for ${school.schoolPrefix}:`, error)
+            }
+          }
+        }
+
         results.push({
           schoolPrefix: school.schoolPrefix,
           students: apiResult.ListDataStudent || [],
           teachers: apiResult.ListDataTeacher || [],
           classes: apiResult.ListDataClasses || [],
           failedUsers: apiResult.ListUserError || [],
-          failedClasses: apiResult.ListClassError || []
+          failedClasses: apiResult.ListClassError || [],
+          packageAssignment: packageResult
         })
 
-        showNotification(
-          `✅ ${school.schoolPrefix}: Created ${(apiResult.ListDataStudent?.length || 0) + (apiResult.ListDataTeacher?.length || 0)} users`,
-          'success'
-        )
+        const userCount = (apiResult.ListDataStudent?.length || 0) + (apiResult.ListDataTeacher?.length || 0)
+        let message = `✅ ${school.schoolPrefix}: Created ${userCount} users`
+        if (packageResult) {
+          message += ` | Packages: ${packageResult.success} assigned`
+          if (packageResult.failed > 0) {
+            message += `, ${packageResult.failed} failed`
+          }
+        }
+        showNotification(message, 'success')
       } catch (error) {
         console.error(`Failed to migrate school ${school.schoolPrefix}:`, error)
         results.push({
@@ -449,7 +722,8 @@ export const useMigration = () => {
           classes: [],
           failedUsers: [],
           failedClasses: [],
-          error: error instanceof Error ? error.message : 'Unknown error'
+          error: error instanceof Error ? error.message : 'Unknown error',
+          packageAssignment: null
         })
         showNotification(
           `❌ ${school.schoolPrefix}: Failed - ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -463,10 +737,93 @@ export const useMigration = () => {
     setProgressMessage('')
 
     const totalSuccess = results.reduce((sum, r) => sum + (r.students?.length || 0) + (r.teachers?.length || 0), 0)
-    showNotification(
-      `🎉 Batch migration complete! Created ${totalSuccess} users across ${batchPreviewData.length} schools`,
-      'success'
-    )
+    const totalPackagesAssigned = results.reduce((sum, r) => sum + (r.packageAssignment?.success || 0), 0)
+
+    let finalMessage = `🎉 Batch migration complete! Created ${totalSuccess} users across ${batchPreviewData.length} schools`
+    if (totalPackagesAssigned > 0) {
+      finalMessage += ` | ${totalPackagesAssigned} packages assigned`
+    }
+
+    showNotification(finalMessage, 'success')
+  }
+
+  // Retry failed package assignments for a specific school in batch results
+  const retryBatchSchoolPackages = async (schoolIndex: number) => {
+    const school = batchResults[schoolIndex]
+    if (!school?.packageAssignment?.failedUsers?.length || !batchSubscriptionConfig?.subscriptionId) {
+      return
+    }
+
+    setRetryingSchoolIndex(schoolIndex)
+    setProgressMessage(`Retrying ${school.packageAssignment.failedUsers.length} failed assignments for ${school.schoolPrefix}...`)
+
+    const BATCH_SIZE = 5
+    const BATCH_DELAY_MS = 300
+    let successCount = school.packageAssignment.success
+    const stillFailedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }> = []
+
+    try {
+      const usersToRetry = school.packageAssignment.failedUsers
+      const batches: any[][] = []
+      for (let i = 0; i < usersToRetry.length; i += BATCH_SIZE) {
+        batches.push(usersToRetry.slice(i, i + BATCH_SIZE))
+      }
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex]
+
+        const results = await Promise.allSettled(
+          batch.map((user) =>
+            givePackageToUser({
+              subscriptionId: batchSubscriptionConfig.subscriptionId,
+              userId: user.userId,
+              description: batchSubscriptionConfig.description || `Batch migration ${new Date().toISOString().split('T')[0]}`,
+              source: parseInt(batchSubscriptionConfig.source),
+              requester: batchSubscriptionConfig.requester || 'Migration Tool',
+            })
+          )
+        )
+
+        results.forEach((result, idx) => {
+          const user = batch[idx]
+          if (result.status === 'fulfilled') {
+            successCount++
+          } else {
+            const errorMsg = result.reason?.response?.data?.message || result.reason?.message || 'Unknown error'
+            stillFailedUsers.push({ ...user, error: errorMsg })
+          }
+        })
+
+        if (batchIndex < batches.length - 1) {
+          await new Promise((r) => setTimeout(r, BATCH_DELAY_MS))
+        }
+      }
+
+      // Update the school's package assignment result
+      const updatedResults = [...batchResults]
+      updatedResults[schoolIndex] = {
+        ...school,
+        packageAssignment: {
+          success: successCount,
+          failed: stillFailedUsers.length,
+          failedUsers: stillFailedUsers
+        }
+      }
+      setBatchResults(updatedResults)
+
+      if (stillFailedUsers.length === 0) {
+        showNotification(`${school.schoolPrefix}: All retries succeeded!`, 'success')
+      } else {
+        const retriedSuccess = successCount - school.packageAssignment.success
+        showNotification(`${school.schoolPrefix}: ${retriedSuccess} succeeded, ${stillFailedUsers.length} still failed`, 'warning')
+      }
+    } catch (error) {
+      console.error(`Retry error for ${school.schoolPrefix}:`, error)
+      showNotification(`Failed to retry for ${school.schoolPrefix}`, 'error')
+    } finally {
+      setRetryingSchoolIndex(null)
+      setProgressMessage('')
+    }
   }
 
   return {
@@ -493,6 +850,16 @@ export const useMigration = () => {
     currentSchoolIndex,
     totalSchools,
     batchPreviewData,
+    retryingSchoolIndex,
+    // Subscription state
+    enableAutoSubscription,
+    subscriptionId,
+    subscriptionDescription,
+    subscriptionRequester,
+    subscriptionSource,
+    isAssigningPackages,
+    packageAssignmentProgress,
+    packageAssignmentResult,
     // Actions
     setSchoolPrefix,
     setActiveTab,
@@ -505,5 +872,13 @@ export const useMigration = () => {
     setIncludeAdminTeacher,
     handleProcessBatch,
     handleCreateBatch,
+    retryBatchSchoolPackages,
+    // Subscription actions
+    setEnableAutoSubscription,
+    setSubscriptionId,
+    setSubscriptionDescription,
+    setSubscriptionRequester,
+    setSubscriptionSource,
+    retryFailedPackages,
   }
 }

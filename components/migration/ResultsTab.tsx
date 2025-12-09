@@ -8,9 +8,26 @@ interface ResultsTabProps {
   createdUsers: any[]
   failedUsers: Array<{ user: any; error: string }>
   showNotification: (message: string, type: 'success' | 'error' | 'warning' | 'info') => void
+  isAssigningPackages?: boolean
+  packageAssignmentProgress?: number
+  packageAssignmentResult?: {
+    success: number
+    failed: number
+    failedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }>
+  } | null
+  retryFailedPackages?: () => Promise<void>
 }
 
-export default function ResultsTab({ result, createdUsers, failedUsers, showNotification }: ResultsTabProps) {
+export default function ResultsTab({
+  result,
+  createdUsers,
+  failedUsers,
+  showNotification,
+  isAssigningPackages = false,
+  packageAssignmentProgress = 0,
+  packageAssignmentResult = null,
+  retryFailedPackages
+}: ResultsTabProps) {
   // Package assignment tracking
   const [packageAssignmentStatus, setPackageAssignmentStatus] = useState<{
     attempted: boolean
@@ -354,8 +371,105 @@ export default function ResultsTab({ result, createdUsers, failedUsers, showNoti
         </div>
       )}
 
+      {/* Auto Package Assignment Status */}
+      {isAssigningPackages && (
+        <Card className="border-2 border-blue-200 bg-blue-50">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold text-blue-900">Assigning Subscription Packages</h3>
+              <span className="text-sm font-medium text-blue-700">
+                {Math.round(packageAssignmentProgress)}%
+              </span>
+            </div>
+            <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
+              <div
+                className="bg-blue-600 h-full transition-all duration-300"
+                style={{ width: `${packageAssignmentProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-blue-600 text-center mt-2">
+              Please wait, do not close this window...
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Auto Package Assignment Result */}
+      {packageAssignmentResult && (
+        <Card className={`border-2 ${packageAssignmentResult.failed === 0 ? 'border-green-200 bg-green-50' : 'border-orange-200 bg-orange-50'}`}>
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center ${packageAssignmentResult.failed === 0 ? 'bg-green-500' : 'bg-orange-500'}`}>
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {packageAssignmentResult.failed === 0 ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  ) : (
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  )}
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className={`font-semibold ${packageAssignmentResult.failed === 0 ? 'text-green-900' : 'text-orange-900'}`}>
+                  {packageAssignmentResult.failed === 0
+                    ? 'Subscription Packages Assigned Successfully!'
+                    : 'Subscription Assignment Completed with Errors'}
+                </h3>
+                <p className={`text-sm ${packageAssignmentResult.failed === 0 ? 'text-green-700' : 'text-orange-700'}`}>
+                  Success: {packageAssignmentResult.success} students
+                  {packageAssignmentResult.failed > 0 && ` | Failed: ${packageAssignmentResult.failed} students`}
+                </p>
+              </div>
+              {packageAssignmentResult.failed > 0 && retryFailedPackages && (
+                <Button
+                  onClick={retryFailedPackages}
+                  variant="warning"
+                  size="sm"
+                  disabled={isAssigningPackages}
+                  icon={
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  }
+                >
+                  Retry Failed ({packageAssignmentResult.failed})
+                </Button>
+              )}
+            </div>
+
+            {/* Failed Users List */}
+            {packageAssignmentResult.failed > 0 && packageAssignmentResult.failedUsers.length > 0 && (
+              <div className="mt-4 border-t border-orange-200 pt-4">
+                <h4 className="text-sm font-semibold text-orange-900 mb-2">Failed Package Assignments:</h4>
+                <div className="bg-white rounded-lg border border-orange-200 max-h-48 overflow-auto">
+                  <Table>
+                    <TableHeader sticky>
+                      <TableRow>
+                        <TableHead>Username</TableHead>
+                        <TableHead>Display Name</TableHead>
+                        <TableHead>Error</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {packageAssignmentResult.failedUsers.map((user, idx) => (
+                        <TableRow key={idx}>
+                          <TableCell className="font-mono text-sm">{user.username || user.userId}</TableCell>
+                          <TableCell className="text-sm">{user.displayName || '-'}</TableCell>
+                          <TableCell>
+                            <Badge variant="error" className="text-xs">{user.error}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Package Assignment Section */}
-      {studentsForPackage.length > 0 && (
+      {studentsForPackage.length > 0 && !isAssigningPackages && !packageAssignmentResult && (
         <>
           <div className="border-t-2 border-gray-200 my-8" />
           <div className="text-center mb-4">

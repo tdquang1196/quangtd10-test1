@@ -119,9 +119,40 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
         <div className="flex-1 overflow-auto p-8 bg-gray-50/30">
           {mode === 'single' ? (
             <>
-              {migration.activeTab === 'upload' && <UploadTab {...migration} />}
+              {migration.activeTab === 'upload' && (
+                <UploadTab
+                  file={migration.file}
+                  schoolPrefix={migration.schoolPrefix}
+                  errors={migration.errors}
+                  includeAdminTeacher={migration.includeAdminTeacher}
+                  enableAutoSubscription={migration.enableAutoSubscription}
+                  subscriptionId={migration.subscriptionId}
+                  subscriptionDescription={migration.subscriptionDescription}
+                  subscriptionRequester={migration.subscriptionRequester}
+                  subscriptionSource={migration.subscriptionSource}
+                  setSchoolPrefix={migration.setSchoolPrefix}
+                  setIncludeAdminTeacher={migration.setIncludeAdminTeacher}
+                  setEnableAutoSubscription={migration.setEnableAutoSubscription}
+                  setSubscriptionId={migration.setSubscriptionId}
+                  setSubscriptionDescription={migration.setSubscriptionDescription}
+                  setSubscriptionRequester={migration.setSubscriptionRequester}
+                  setSubscriptionSource={migration.setSubscriptionSource}
+                  handleFileChange={migration.handleFileChange}
+                />
+              )}
               {migration.activeTab === 'preview' && <PreviewTab {...migration} />}
-              {migration.activeTab === 'results' && <ResultsTab {...migration} />}
+              {migration.activeTab === 'results' && (
+                <ResultsTab
+                  result={migration.result}
+                  createdUsers={migration.createdUsers}
+                  failedUsers={migration.failedUsers}
+                  showNotification={migration.showNotification}
+                  isAssigningPackages={migration.isAssigningPackages}
+                  packageAssignmentProgress={migration.packageAssignmentProgress}
+                  packageAssignmentResult={migration.packageAssignmentResult}
+                  retryFailedPackages={migration.retryFailedPackages}
+                />
+              )}
             </>
           ) : (
             <>
@@ -143,6 +174,8 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                 <BatchResultsTab
                   results={migration.batchResults}
                   onClose={handleClose}
+                  retryBatchSchoolPackages={migration.retryBatchSchoolPackages}
+                  retryingSchoolIndex={migration.retryingSchoolIndex}
                 />
               )}
             </>
