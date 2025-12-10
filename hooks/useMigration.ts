@@ -800,6 +800,159 @@ export const useMigration = () => {
     showNotification(finalMessage, 'success')
   }
 
+  // Retry failed user migrations (not package assignments)
+  const retryFailedUsers = async () => {
+    if (!result?.ListUserError || result.ListUserError.length === 0) {
+      showNotification('No failed users to retry', 'warning')
+      return
+    }
+
+    setIsCreating(true)
+    setProgressMessage(`Retrying ${result.ListUserError.length} failed users...`)
+
+    try {
+      // Separate students and teachers from failed users
+      const failedStudents = result.ListUserError.filter((u: any) =>
+        result.ListDataStudent.some((s: any) => s.username === u.username)
+      )
+      const failedTeachers = result.ListUserError.filter((u: any) =>
+        result.ListDataTeacher.some((t: any) => t.username === u.username)
+      )
+
+      const listDataStudent = failedStudents.map((user: any) => ({
+        username: user.username,
+        displayName: user.displayName,
+        password: user.password,
+        classses: user.classses,
+        phoneNumber: user.phoneNumber || ''
+      }))
+
+      const listDataTeacher = failedTeachers.map((user: any) => ({
+        username: user.username,
+        displayName: user.displayName,
+        password: user.password,
+        classses: user.classses,
+        phoneNumber: ''
+      }))
+
+      // Get unique classes from retry users
+      const uniqueClasses = Array.from(new Set([
+        ...failedStudents.map((s: any) => s.classses),
+        ...failedTeachers.map((t: any) => t.classses)
+      ].filter(Boolean)))
+
+      const listDataClasses = uniqueClasses.map(className => ({
+        username: className,
+        displayName: '',
+        password: '',
+        classses: className,
+        phoneNumber: '',
+        grade: undefined
+      }))
+
+      const token = localStorage.getItem('auth_token')
+      const response = await axios.post('/api/migrate', {
+        ListDataStudent: listDataStudent,
+        ListDataTeacher: listDataTeacher,
+        ListDataClasses: listDataClasses
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const retryResult = response.data
+
+      // Merge retry results with existing results
+      const updatedStudents = [...result.ListDataStudent]
+      const updatedTeachers = [...result.ListDataTeacher]
+      const updatedErrors = [...result.ListUserError]
+
+      // Update successful retries
+      retryResult.ListDataStudent?.forEach((student: any) => {
+        const existingIndex = updatedStudents.findIndex((s: any) => s.username === student.username)
+        if (existingIndex >= 0) {
+          updatedStudents[existingIndex] = student
+        } else {
+          updatedStudents.push(student)
+        }
+        // Remove from errors if successful
+        const errorIndex = updatedErrors.findIndex((e: any) => e.username === student.username)
+        if (errorIndex >= 0) {
+          updatedErrors.splice(errorIndex, 1)
+        }
+      })
+
+      retryResult.ListDataTeacher?.forEach((teacher: any) => {
+        const existingIndex = updatedTeachers.findIndex((t: any) => t.username === teacher.username)
+        if (existingIndex >= 0) {
+          updatedTeachers[existingIndex] = teacher
+        } else {
+          updatedTeachers.push(teacher)
+        }
+        // Remove from errors if successful
+        const errorIndex = updatedErrors.findIndex((e: any) => e.username === teacher.username)
+        if (errorIndex >= 0) {
+          updatedErrors.splice(errorIndex, 1)
+        }
+      })
+
+      // Add new errors from retry
+      retryResult.ListUserError?.forEach((error: any) => {
+        const existingErrorIndex = updatedErrors.findIndex((e: any) => e.username === error.username)
+        if (existingErrorIndex >= 0) {
+          updatedErrors[existingErrorIndex] = error
+        }
+      })
+
+      // Update result state
+      const updatedResult = {
+        ...result,
+        ListDataStudent: updatedStudents,
+        ListDataTeacher: updatedTeachers,
+        ListUserError: updatedErrors,
+        ListClassError: result.ListClassError || []
+      }
+      setResult(updatedResult)
+
+      // Update created/failed users
+      const allCreated = [
+        ...updatedStudents.filter((s: any) => !updatedErrors.find((e: any) => e.username === s.username)),
+        ...updatedTeachers.filter((t: any) => !updatedErrors.find((e: any) => e.username === t.username))
+      ]
+      setCreatedUsers(allCreated)
+
+      const allFailed = updatedErrors.map((u: any) => ({
+        user: { username: u.username, displayName: u.displayName },
+        error: u.reason || 'Failed to create user'
+      }))
+      setFailedUsers(allFailed)
+
+      const retriedSuccess = (retryResult.ListDataStudent?.length || 0) + (retryResult.ListDataTeacher?.length || 0)
+      const stillFailed = retryResult.ListUserError?.length || 0
+
+      if (stillFailed === 0) {
+        showNotification(`All ${retriedSuccess} failed users successfully retried!`, 'success')
+      } else {
+        showNotification(`Retry complete: ${retriedSuccess} succeeded, ${stillFailed} still failed`, 'warning')
+      }
+
+      // Auto-assign packages to newly successful students if enabled
+      if (enableAutoSubscription && retryResult.ListDataStudent?.length > 0) {
+        const successfulStudents = retryResult.ListDataStudent.filter((s: any) => s.id)
+        if (successfulStudents.length > 0) {
+          await assignPackagesToStudents(successfulStudents)
+        }
+      }
+    } catch (error) {
+      console.error('Retry error:', error)
+      showNotification(error instanceof Error ? error.message : 'Failed to retry', 'error')
+    } finally {
+      setIsCreating(false)
+      setProgressMessage('')
+    }
+  }
+
   // Retry failed package assignments for a specific school in batch results
   const retryBatchSchoolPackages = async (schoolIndex: number) => {
     const school = batchResults[schoolIndex]
@@ -928,6 +1081,7 @@ export const useMigration = () => {
     handleProcessBatch,
     handleCreateBatch,
     retryBatchSchoolPackages,
+    retryFailedUsers,
     // Subscription actions
     setEnableAutoSubscription,
     setSubscriptionId,

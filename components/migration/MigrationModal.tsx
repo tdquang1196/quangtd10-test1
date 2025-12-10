@@ -153,6 +153,8 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                   packageAssignmentProgress={migration.packageAssignmentProgress}
                   packageAssignmentResult={migration.packageAssignmentResult}
                   retryFailedPackages={migration.retryFailedPackages}
+                  retryFailedUsers={migration.retryFailedUsers}
+                  isRetrying={migration.isCreating}
                 />
               )}
             </>

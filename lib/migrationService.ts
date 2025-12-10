@@ -63,6 +63,43 @@ interface MigrationResult {
   listDataClasses: UserData[]
   listUserError: UserData[]
   listClassError: UserData[]
+  roleAssignmentError?: string
+}
+
+// Role-related interfaces matching C# models
+interface Role {
+  id: string
+  name: string
+  description: string
+  legacyValue: number
+  permissions: string[]
+  userIds: string[]
+  createdAt: string
+  createdBy: string
+  updatedAt?: string
+  updatedBy?: string
+  isDeleted: boolean
+  deletedAt?: string
+  deletedBy?: string
+}
+
+interface GetRolesResult {
+  roles: Role[]
+}
+
+interface SaveRoleCommand {
+  id?: string
+  name: string
+  description: string
+  permissions: string[]
+  isDeleted: boolean
+  legacyValue: number
+  userIds: string[]
+}
+
+interface SaveRoleResult {
+  success?: boolean
+  id?: string
 }
 
 const MIN_LENGTH_DISPLAY_NAME = 2
@@ -85,7 +122,7 @@ class ThrottledDispatcher {
 
   constructor(name: string, requestsPerSecond: number) {
     this.name = name
-    this.minInterval = 1000 / requestsPerSecond // 2 req/s = 500ms interval
+    this.minInterval = 1200 / requestsPerSecond // 2 req/s = 500ms interval
   }
 
   async dispatch<T>(fn: () => Promise<T>): Promise<T> {
@@ -262,6 +299,9 @@ export class MigrationService {
 
     let idx = 0
     while (true) {
+      let retryCount503 = 0
+      const MAX_503_RETRIES = 100
+
       try {
         const tryUsername = idx === 0 ? username : `${username}${idx}`
         const response = await client.post('/auth/register', {
@@ -281,6 +321,18 @@ export class MigrationService {
           return { success: false, error: content }
         }
       } catch (error: any) {
+        // Check for 503 error and retry
+        if (error.message?.includes('Request failed with status code 503')) {
+          retryCount503++
+          if (retryCount503 < MAX_503_RETRIES) {
+            console.log(`[Register 503] Retry ${retryCount503}/${MAX_503_RETRIES} for ${username}`)
+            await new Promise(resolve => setTimeout(resolve, 500))
+            continue
+          } else {
+            return { success: false, error: `Failed after ${MAX_503_RETRIES} retries: ${error.message}` }
+          }
+        }
+
         if (error.response?.data?.message?.includes('USER_NAME_EXIST')) {
           idx++
           await new Promise(resolve => setTimeout(resolve, 500))
@@ -292,15 +344,33 @@ export class MigrationService {
   }
 
   private async loginUser(username: string, password: string): Promise<LoginResult | null> {
-    try {
-      const response = await axios.post<LoginResult>(`${this.baseUrl}/auth/login`, {
-        username,
-        password
-      })
-      return response.data
-    } catch (error) {
-      return null
+    const MAX_503_RETRIES = 100
+    let retryCount503 = 0
+
+    while (retryCount503 <= MAX_503_RETRIES) {
+      try {
+        const response = await axios.post<LoginResult>(`${this.baseUrl}/auth/login`, {
+          username,
+          password
+        })
+        return response.data
+      } catch (error: any) {
+        // Check for 503 error and retry
+        if (error.message?.includes('Request failed with status code 503')) {
+          retryCount503++
+          if (retryCount503 < MAX_503_RETRIES) {
+            console.log(`[Login 503] Retry ${retryCount503}/${MAX_503_RETRIES} for ${username}`)
+            await new Promise(resolve => setTimeout(resolve, 500))
+            continue
+          } else {
+            console.error(`[Login 503] Failed after ${MAX_503_RETRIES} retries for ${username}`)
+            return null
+          }
+        }
+        return null
+      }
     }
+    return null
   }
 
   private async validateDisplayName(
@@ -636,6 +706,93 @@ export class MigrationService {
     }
   }
 
+  /**
+   * Get all roles from the system
+   */
+  private async getRoles(): Promise<Role[]> {
+    try {
+      const response = await this.adminClient!.get<GetRolesResult>(
+        '/manage/user/roles?pageSize=1000&pageIndex=1'
+      )
+      return response.data.roles || []
+    } catch (error) {
+      console.error('Failed to fetch roles:', error)
+      return []
+    }
+  }
+
+  /**
+   * Save or update a role with new user IDs
+   * Data pushed to server will append to current data
+   */
+  private async saveRole(roleCommand: SaveRoleCommand): Promise<boolean> {
+    try {
+      await this.adminClient!.post('/manage/user/roles', roleCommand)
+      console.log(`✓ Role "${roleCommand.name}" updated with ${roleCommand.userIds.length} users`)
+      return true
+    } catch (error: any) {
+      console.error(`Failed to save role "${roleCommand.name}":`, error.message)
+      if (error.response) {
+        console.error('Response data:', JSON.stringify(error.response.data))
+      }
+      return false
+    }
+  }
+
+  /**
+   * Assign teachers to the Teacher role
+   * Only adds teacher user IDs to the role's userIds list
+   */
+  private async assignTeachersToRole(teacherIds: string[]): Promise<boolean> {
+    try {
+      if (teacherIds.length === 0) {
+        console.log('No teachers to assign to role')
+        return true
+      }
+
+      console.log(`Assigning ${teacherIds.length} teachers to Teacher role...`)
+
+      // Get all roles
+      const roles = await this.getRoles()
+
+      // Find the Teacher role (by name)
+      const teacherRole = roles.find(r => r.name.toLowerCase() === 'teacher' || r.name.toLowerCase() === 'giáo viên')
+
+      if (!teacherRole) {
+        console.error('Teacher role not found in system')
+        return false
+      }
+
+      // Merge existing userIds with new teacher IDs (append, don't replace)
+      const existingUserIds = teacherRole.userIds || []
+      const allUserIds = [...new Set([...existingUserIds, ...teacherIds])] // Remove duplicates
+
+      // Prepare save command
+      const saveCommand: SaveRoleCommand = {
+        id: teacherRole.id,
+        name: teacherRole.name,
+        description: teacherRole.description,
+        permissions: teacherRole.permissions || [],
+        isDeleted: false,
+        legacyValue: teacherRole.legacyValue,
+        userIds: allUserIds
+      }
+
+      // Save updated role
+      const success = await this.saveRole(saveCommand)
+
+      if (success) {
+        console.log(`✓ Successfully assigned ${teacherIds.length} teachers to role "${teacherRole.name}"`)
+        console.log(`  Total users in role: ${allUserIds.length} (added ${teacherIds.length} new)`)
+      }
+
+      return success
+    } catch (error: any) {
+      console.error('Failed to assign teachers to role:', error.message)
+      return false
+    }
+  }
+
   public async migrate(
     students: UserData[],
     teachers: UserData[],
@@ -941,20 +1098,28 @@ export class MigrationService {
           // Class exists - just add students to existing group (no teachers)
           console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Class ${classItem.username} already exists (Group ID: ${existingGroupId}), adding ${groupStudents.length} students...`)
 
-          await this.adminClient!.put('/manage/User/Group/Set', {
-            groupId: existingGroupId,
-            userIds: groupStudents
-          })
+          // Retry adding students to group
+          await retryWithBackoff(
+            () => this.adminClient!.put('/manage/User/Group/Set', {
+              groupId: existingGroupId,
+              userIds: groupStudents
+            }),
+            { context: `Add students to group ${classItem.username}`, maxRetries: 5 }
+          )
 
           console.log(`${getTimestamp()} [${i + 1}/${classes.length}] ✅ Added ${groupStudents.length} students to existing class ${classItem.username} (teachers not created)`)
         } else {
           // Class doesn't exist - create new class and group with teachers
           console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Creating new class: ${classItem.username}`)
 
-          const createGroupResponse = await this.adminClient!.post<SaveUserGroupResult>('/manage/user/group', {
-            name: classItem.username,
-            users: groupStudents
-          })
+          // Retry group creation
+          const createGroupResponse = await retryWithBackoff(
+            () => this.adminClient!.post<SaveUserGroupResult>('/manage/user/group', {
+              name: classItem.username,
+              users: groupStudents
+            }),
+            { context: `Create group ${classItem.username}`, maxRetries: 5 }
+          )
 
           const groupId = createGroupResponse.data.userGroup.id
 
@@ -982,15 +1147,19 @@ export class MigrationService {
             classTeachers.push(existingAdminTeacherId)
           }
 
-          await this.adminClient!.post('/manage/classes', {
-            name: classItem.username,
-            description: classItem.username,
-            startDate: '2025-01-01T00:00:00.000Z',
-            endDate: '2026-04-01T00:00:00.000Z',
-            targetGroups: [groupId],
-            teachers: classTeachers,
-            grades: classItem.grade ? [classItem.grade] : []
-          })
+          // Retry class creation
+          await retryWithBackoff(
+            () => this.adminClient!.post('/manage/classes', {
+              name: classItem.username,
+              description: classItem.username,
+              startDate: '2025-01-01T00:00:00.000Z',
+              endDate: '2026-04-01T00:00:00.000Z',
+              targetGroups: [groupId],
+              teachers: classTeachers,
+              grades: classItem.grade ? [classItem.grade] : []
+            }),
+            { context: `Create class ${classItem.username}`, maxRetries: 5 }
+          )
 
           console.log(`${getTimestamp()} [${i + 1}/${classes.length}] ✅ Class ${classItem.username} created (${groupStudents.length} students, ${classTeachers.length} teachers)`)
         }
@@ -1005,6 +1174,30 @@ export class MigrationService {
       }
     }
 
+    // ===== PHASE 4: ASSIGN TEACHERS TO ROLE =====
+    console.log(`\\n${getTimestamp()} ========== PHASE 4: TEACHER ROLE ASSIGNMENT ==========`)
+
+    // Collect all successfully created teacher IDs (only teachers, not students)
+    const successfulTeacherIds = teachersToCreate
+      .filter(t => t.id && !listUserError.some(err => err.username === t.username))
+      .map(t => t.id!)
+
+    console.log(`${getTimestamp()} Found ${successfulTeacherIds.length} successfully created teachers to assign to role`)
+
+    let roleAssignmentError: string | undefined
+
+    if (successfulTeacherIds.length > 0) {
+      const roleAssignmentSuccess = await this.assignTeachersToRole(successfulTeacherIds)
+      if (!roleAssignmentSuccess) {
+        roleAssignmentError = 'Failed to assign teachers to role'
+        console.error(`${getTimestamp()} ❌ ${roleAssignmentError}`)
+      } else {
+        console.log(`${getTimestamp()} ✅ Successfully assigned ${successfulTeacherIds.length} teachers to Teacher role`)
+      }
+    } else {
+      console.log(`${getTimestamp()} No teachers to assign to role`)
+    }
+
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(`${getTimestamp()} Migration completed in ${totalTime}s`)
     console.log(`${getTimestamp()} Success: ${students.length + teachersToCreate.length - listUserError.length} users (${students.length} students, ${teachersToCreate.length} teachers)`)
@@ -1015,7 +1208,7 @@ export class MigrationService {
     // Write results to file
     const filepath = this.writeResultsToFile(students, teachersToCreate, classes, listUserError, listClassError)
     if (filepath) {
-      console.log(`\n${getTimestamp()} Results saved to file: ${filepath}`)
+      console.log(`\\n${getTimestamp()} Results saved to file: ${filepath}`)
     }
 
     return {
@@ -1023,7 +1216,8 @@ export class MigrationService {
       listDataTeacher: teachersToCreate,
       listDataClasses: classes,
       listUserError: listUserError,
-      listClassError: listClassError
+      listClassError: listClassError,
+      roleAssignmentError: roleAssignmentError
     }
   }
 }
