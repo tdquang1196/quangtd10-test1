@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from 'axios'
 import { getRandomEquipmentSet } from '@/config/equipment'
 import fs from 'fs'
 import path from 'path'
+import { retryWithBackoff } from './utils/retryHelper'
 
 interface UserData {
   id?: string
@@ -16,6 +17,15 @@ interface UserData {
   grade?: number
   accessToken?: string // Store access token from registration to avoid re-login
   loginDisplayName?: string // Store login display name from Phase 1 for fallback in Phase 2
+
+  // State tracking for resume-from-failed-step retry
+  state?: {
+    registered?: boolean      // Phase 1 complete
+    loggedIn?: boolean        // Phase 2 complete
+    equipmentSet?: boolean    // Phase 3a complete
+    phoneUpdated?: boolean    // Phase 3b complete
+  }
+  retryCount?: number
 }
 
 interface LoginResult {
@@ -61,7 +71,7 @@ const MAX_LENGTH_DISPLAY_NAME = 20
 // Rate limiting configuration
 const REGISTER_RATE = 2 // 2 requests/second for register API
 const LOGIN_RATE = 2 // 2 requests/second for login API
-const MAX_CONCURRENT_GROUPS = 5 // Maximum number of display name groups to process in parallel
+const MAX_CONCURRENT_GROUPS = 10 // Maximum number of display name groups to process in parallel
 
 /**
  * Throttled dispatcher for rate-limited parallel request dispatching.
@@ -125,22 +135,6 @@ export class MigrationService {
     }
   }
 
-  /**
-   * Group users by their base username to prevent parallel conflicts
-   */
-  private groupByUsername(users: UserData[]): Map<string, UserData[]> {
-    const groups = new Map<string, UserData[]>()
-
-    for (const user of users) {
-      const baseUsername = user.username.toLowerCase()
-      if (!groups.has(baseUsername)) {
-        groups.set(baseUsername, [])
-      }
-      groups.get(baseUsername)!.push(user)
-    }
-
-    return groups
-  }
 
   /**
    * Group users by their base display name to prevent parallel conflicts
@@ -154,6 +148,23 @@ export class MigrationService {
         groups.set(baseDisplayName, [])
       }
       groups.get(baseDisplayName)!.push(user)
+    }
+
+    return groups
+  }
+
+  /**
+   * Group users by base username to prevent conflicts during registration
+   */
+  private groupByUsername(users: UserData[]): Map<string, UserData[]> {
+    const groups = new Map<string, UserData[]>()
+
+    for (const user of users) {
+      const baseUsername = user.username.toLowerCase()
+      if (!groups.has(baseUsername)) {
+        groups.set(baseUsername, [])
+      }
+      groups.get(baseUsername)!.push(user)
     }
 
     return groups
@@ -553,17 +564,29 @@ export class MigrationService {
     user.actualDisplayName = validatedDisplayName || defaultDisplayName
 
     // Set equipment and profile (continue even if this fails)
-    try {
-      await this.setEquipmentAndProfile(userClient, user.actualDisplayName)
-    } catch (error) {
-      console.error('Equipment setup failed, continuing with phone number update:', error)
+    if (!user.state?.equipmentSet) {
+      try {
+        await retryWithBackoff(
+          () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!),
+          { context: `Equipment ${user.actualUserName}`, maxRetries: 3 }
+        )
+        user.state = { ...user.state, equipmentSet: true }
+      } catch (error) {
+        console.error('Equipment setup failed after retries, continuing with phone number update:', error)
+      }
     }
 
     // Always update phone number (even if display name validation or equipment failed)
-    try {
-      await this.updatePhoneNumber(userClient, user.phoneNumber)
-    } catch (error) {
-      console.error('Phone number update failed:', error)
+    if (!user.state?.phoneUpdated && user.phoneNumber) {
+      try {
+        await retryWithBackoff(
+          () => this.updatePhoneNumber(userClient, user.phoneNumber),
+          { context: `Phone ${user.actualUserName}`, maxRetries: 3 }
+        )
+        user.state = { ...user.state, phoneUpdated: true }
+      } catch (error) {
+        console.error('Phone number update failed after retries:', error)
+      }
     }
   }
 
@@ -682,79 +705,161 @@ export class MigrationService {
       (teacher as any).originalIndex = students.length + index
     })
 
-    // ===== PHASE 1: USER REGISTRATION (Parallel with Rate Limiting) =====
-    console.log(`\n${getTimestamp()} ========== PHASE 1: USER REGISTRATION (Parallel, ${REGISTER_RATE} reg/s, ${LOGIN_RATE} login/s) ==========`)
+    // ===== PHASE 1: USER REGISTRATION (Grouped by Username) =====
+    console.log(`\n${getTimestamp()} ========== PHASE 1: USER REGISTRATION (${REGISTER_RATE} req/s) ==========`)
     const allUsers = [...students, ...teachersToCreate]
-    console.log(`${getTimestamp()} Processing ${allUsers.length} user registrations with throttled parallel dispatch`)
+    console.log(`${getTimestamp()} Registering ${allUsers.length} user accounts with grouped parallel dispatch`)
 
-    // Create throttled dispatchers for each endpoint
+    // Group by username to prevent conflicts
+    const usernameGroups = this.groupByUsername(allUsers)
+    console.log(`${getTimestamp()} Grouped ${allUsers.length} users into ${usernameGroups.size} username groups`)
+
+    // Create throttled dispatcher for registration
     const registerDispatcher = new ThrottledDispatcher('Register', REGISTER_RATE)
-    const loginDispatcher = new ThrottledDispatcher('Login', LOGIN_RATE)
 
     let completedRegistrations = 0
 
-    // Dispatch all registrations with throttling, collect promises
-    const registrationPromises = allUsers.map(async (user) => {
+    // Convert groups to array
+    const registrationGroupEntries = Array.from(usernameGroups.entries())
+
+    // Process username groups with concurrency pool
+    let registrationActiveGroups = 0
+    let registrationCurrentIndex = 0
+    const registrationTotalGroups = registrationGroupEntries.length
+
+    const processNextRegistrationGroup = async (): Promise<void> => {
+      if (registrationCurrentIndex >= registrationTotalGroups) return
+
+      const index = registrationCurrentIndex++
+      const [baseUsername, usersInGroup] = registrationGroupEntries[index]
+
+      registrationActiveGroups++
+      console.log(`${getTimestamp()} [Registration] Processing username group: ${baseUsername} (${usersInGroup.length} users) [${registrationActiveGroups} active groups]`)
+
       try {
-        // Check existing usernames first (uses admin client, not rate limited)
-        const existingUsernames = await this.getExistingUsernames(user.username)
-        let tempIdx = 0
-        let finalUsername = user.username
-        while (existingUsernames.has(finalUsername.toLowerCase())) {
-          tempIdx++
-          finalUsername = `${user.username}${tempIdx}`
+        // Process users in this group sequentially to ensure unique usernames
+        for (const user of usersInGroup) {
+          try {
+            // Skip if already registered
+            if (user.state?.registered) {
+              console.log(`${getTimestamp()} [Registration] Skip ${user.username} (already registered)`)
+              completedRegistrations++
+              continue
+            }
+
+            // Check existing usernames first (uses admin client, not rate limited)
+            const existingUsernames = await this.getExistingUsernames(user.username)
+            let tempIdx = 0
+            let finalUsername = user.username
+            while (existingUsernames.has(finalUsername.toLowerCase())) {
+              tempIdx++
+              finalUsername = `${user.username}${tempIdx}`
+            }
+            user.username = finalUsername
+
+            // Wrap registration with retry (3 attempts with backoff)
+            const registerResult = await retryWithBackoff(
+              () => registerDispatcher.dispatch(() =>
+                this.registerUser(user.username, user.password)
+              ),
+              { context: `Register ${user.username}`, maxRetries: 3 }
+            )
+
+            if (!registerResult.success) {
+              user.reason = registerResult.error || 'Registration failed'
+              listUserError.push({ ...user })
+              completedRegistrations++
+              console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - FAILED: ${user.username}`)
+              continue
+            }
+
+            user.actualUserName = registerResult.actualUsername!
+            user.state = { ...user.state, registered: true }
+            user.retryCount = 0
+            completedRegistrations++
+            console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - OK: ${user.actualUserName}`)
+          } catch (error: any) {
+            user.reason = error.message || 'Unknown error'
+            user.retryCount = (user.retryCount || 0) + 1
+            listUserError.push({ ...user })
+            completedRegistrations++
+            console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - ERROR: ${user.username} - ${error.message}`)
+          }
         }
-        user.username = finalUsername
+      } finally {
+        registrationActiveGroups--
+        // When this group finishes, start the next one
+        await processNextRegistrationGroup()
+      }
+    }
 
-        // Throttle the SEND only, responses complete in parallel
-        const registerResult = await registerDispatcher.dispatch(() =>
-          this.registerUser(user.username, user.password)
-        )
+    // Start initial batch of groups
+    const registrationInitialPromises = []
+    for (let i = 0; i < Math.min(MAX_CONCURRENT_GROUPS, registrationTotalGroups); i++) {
+      registrationInitialPromises.push(processNextRegistrationGroup())
+    }
 
-        if (!registerResult.success) {
-          user.reason = registerResult.error || 'Registration failed'
-          listUserError.push({ ...user })
-          completedRegistrations++
-          console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - FAILED: ${user.username}`)
+    await Promise.all(registrationInitialPromises)
+
+    console.log(`${getTimestamp()} Phase 1 complete: ${completedRegistrations} registrations processed, ${listUserError.length} failed`)
+
+    // ===== PHASE 2: USER LOGIN (Parallel with Rate Limiting) =====
+    console.log(`\n${getTimestamp()} ========== PHASE 2: USER LOGIN (${LOGIN_RATE} req/s) ==========`)
+
+    // Only login successfully registered users
+    const registeredUsers = allUsers.filter(u => u.actualUserName && !listUserError.some(err => err.username === u.username))
+    console.log(`${getTimestamp()} Logging in ${registeredUsers.length} users to get access tokens`)
+
+    const loginDispatcher = new ThrottledDispatcher('Login', LOGIN_RATE)
+    let completedLogins = 0
+
+    const loginPromises = registeredUsers.map(async (user) => {
+      try {
+        // Skip if already logged in
+        if (user.state?.loggedIn) {
+          console.log(`${getTimestamp()} [Login] Skip ${user.actualUserName} (already logged in)`)
+          completedLogins++
           return
         }
 
-        user.actualUserName = registerResult.actualUsername!
-
-        // Throttle login call separately
-        const loginResult = await loginDispatcher.dispatch(() =>
-          this.loginUser(user.actualUserName!, user.password)
+        // Wrap login with retry (3 attempts with backoff)
+        const loginResult = await retryWithBackoff(
+          () => loginDispatcher.dispatch(() =>
+            this.loginUser(user.actualUserName!, user.password)
+          ),
+          { context: `Login ${user.actualUserName}`, maxRetries: 3 }
         )
 
         if (!loginResult) {
           user.reason = 'Login failed after registration'
           listUserError.push({ ...user })
-          completedRegistrations++
-          console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - LOGIN FAILED: ${user.actualUserName}`)
+          completedLogins++
+          console.log(`${getTimestamp()} [Login] ${completedLogins}/${registeredUsers.length} - FAILED: ${user.actualUserName}`)
           return
         }
 
         user.id = loginResult.userId
         user.accessToken = loginResult.accessToken
         user.loginDisplayName = loginResult.displayName
+        user.state = { ...user.state, loggedIn: true }
 
-        completedRegistrations++
-        console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - OK: ${user.actualUserName}`)
+        completedLogins++
+        console.log(`${getTimestamp()} [Login] ${completedLogins}/${registeredUsers.length} - OK: ${user.actualUserName}`)
       } catch (error: any) {
-        user.reason = error.message || 'Unknown error'
+        user.reason = error.message || 'Login error'
+        user.retryCount = (user.retryCount || 0) + 1
         listUserError.push({ ...user })
-        completedRegistrations++
-        console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - ERROR: ${user.username} - ${error.message}`)
+        completedLogins++
+        console.log(`${getTimestamp()} [Login] ${completedLogins}/${registeredUsers.length} - ERROR: ${user.actualUserName} - ${error.message}`)
       }
     })
 
-    // Wait for all registrations to complete
-    await Promise.all(registrationPromises)
+    await Promise.all(loginPromises)
 
-    console.log(`${getTimestamp()} Phase 1 complete: ${completedRegistrations} registrations processed, ${listUserError.length} failed`)
+    console.log(`${getTimestamp()} Phase 2 complete: ${completedLogins} logins processed, ${listUserError.length} total failed`)
 
-    // ===== PHASE 2: CHARACTER INITIALIZATION (Grouped by Display Name) =====
-    console.log(`\n${getTimestamp()} ========== PHASE 2: CHARACTER INITIALIZATION ==========`)
+    // ===== PHASE 3: CHARACTER INITIALIZATION (Grouped by Display Name) =====
+    console.log(`\n${getTimestamp()} ========== PHASE 3: CHARACTER INITIALIZATION ==========`)
 
     // Only initialize characters for successfully registered users
     const successfullyRegistered = allUsers.filter(u => u.actualUserName && !listUserError.some(err => err.username === u.username))
@@ -807,7 +912,7 @@ export class MigrationService {
 
     await Promise.all(initialPromises)
 
-    console.log(`${getTimestamp()} Phase 2 complete: ${processedInits} characters initialized`)
+    console.log(`${getTimestamp()} Phase 3 complete: ${processedInits} characters initialized`)
 
     // Restore original order from Excel file
     students.sort((a, b) => ((a as any).originalIndex || 0) - ((b as any).originalIndex || 0))
