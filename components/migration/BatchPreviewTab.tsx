@@ -7,7 +7,6 @@ interface SchoolPreviewData {
     students: any[]
     teachers: any[]
     classes: string[]
-    createAdminTeacher: boolean
 }
 
 interface BatchPreviewTabProps {
@@ -61,7 +60,6 @@ export default function BatchPreviewTab({ schools, onBack, onCreate, isCreating 
                                 <h4 className="text-lg font-bold text-gray-900">{school.schoolPrefix}</h4>
                                 <p className="text-sm text-gray-600">
                                     {school.students.length} students • {school.teachers.length} teachers • {school.classes.length} classes
-                                    {school.createAdminTeacher && <span className="ml-2 text-blue-600">• Admin teacher included</span>}
                                 </p>
                             </div>
                         </div>

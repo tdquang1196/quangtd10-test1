@@ -22,7 +22,6 @@ export const useMigration = () => {
   const [notification, setNotification] = useState<NotificationState | null>(null)
   const [existingClasses, setExistingClasses] = useState<string[]>([])
   const [isCheckingClasses, setIsCheckingClasses] = useState(false)
-  const [includeAdminTeacher, setIncludeAdminTeacher] = useState(false)
 
   // Excel configuration
   const [excelConfig, setExcelConfig] = useState({
@@ -78,7 +77,6 @@ export const useMigration = () => {
     setFailedUsers([])
     setResult(null)
     setActiveTab('upload')
-    setIncludeAdminTeacher(false)
     setEnableAutoSubscription(false)
     setSubscriptionId('')
     setSubscriptionDescription('')
@@ -237,8 +235,7 @@ export const useMigration = () => {
             allExcelRows,
             schoolPrefix.trim().toLowerCase(),
             new Set(),
-            new Set(),
-            includeAdminTeacher
+            new Set()
           )
 
           setStudents(processed.students)
@@ -530,7 +527,6 @@ export const useMigration = () => {
       id: string
       file: File | null
       schoolPrefix: string
-      createAdminTeacher: boolean
     }>,
     subscriptionConfig?: {
       enabled: boolean
@@ -580,8 +576,7 @@ export const useMigration = () => {
                 excelRows,
                 school.schoolPrefix.trim().toLowerCase(),
                 new Set(),
-                new Set(),
-                school.createAdminTeacher
+                new Set()
               )
 
               resolve(processed)
@@ -599,8 +594,7 @@ export const useMigration = () => {
           schoolPrefix: school.schoolPrefix,
           students: fileData.students,
           teachers: fileData.teachers,
-          classes: uniqueClasses,
-          createAdminTeacher: school.createAdminTeacher
+          classes: uniqueClasses
         })
       } catch (error) {
         console.error(`Failed to process file for ${school.schoolPrefix}:`, error)
@@ -1050,7 +1044,6 @@ export const useMigration = () => {
     notification,
     existingClasses,
     isCheckingClasses,
-    includeAdminTeacher,
     excelConfig,
     batchResults,
     isBatchProcessing,
@@ -1076,7 +1069,6 @@ export const useMigration = () => {
     handleFileChange,
     handleProcessFile,
     handleCreateUsers,
-    setIncludeAdminTeacher,
     setExcelConfig,
     handleProcessBatch,
     handleCreateBatch,

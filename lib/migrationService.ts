@@ -822,32 +822,36 @@ export class MigrationService {
     const existingClasses = await this.getExistingClasses(schoolPrefix)
     console.log(`${getTimestamp()} Found ${existingClasses.size} existing classes`)
 
-    // Check if admin teacher needs to be fetched
-    const hasAdminTeacherInList = teachers.some(t => t.classses.toUpperCase() === schoolPrefix.toUpperCase())
     let existingAdminTeacherId: string | null = null
-
-    if (!hasAdminTeacherInList) {
-      console.log(`${getTimestamp()} Admin teacher not in create list, checking if one exists...`)
-      const existingAdminTeacher = await this.getExistingAdminTeacher(schoolPrefix)
-      if (existingAdminTeacher) {
-        existingAdminTeacherId = existingAdminTeacher.id
-        console.log(`${getTimestamp()} Will add existing admin teacher ${existingAdminTeacher.username} to all new classes`)
-      } else {
-        console.log(`${getTimestamp()} No existing admin teacher found`)
-      }
-    }
-
     const listUserError: UserData[] = []
     const listClassError: UserData[] = []
 
-    // Filter teachers - only keep teachers for NEW classes (classes that don't exist yet)
-    // BUT always keep the admin teacher (the one with className === schoolPrefix.toUpperCase())
+    // Check if admin teacher already exists in the system
+    console.log(`${getTimestamp()} Checking for existing admin teacher...`)
+    const existingAdminTeacher = await this.getExistingAdminTeacher(schoolPrefix)
+    const adminTeacherExists = existingAdminTeacher !== null
+
+    if (adminTeacherExists) {
+      console.log(`${getTimestamp()} Admin teacher already exists: ${existingAdminTeacher!.username}, will use for class assignments`)
+      existingAdminTeacherId = existingAdminTeacher!.id
+    } else {
+      console.log(`${getTimestamp()} No existing admin teacher found, will create new one if present in data`)
+    }
+
+    // Filter teachers based on existing classes and admin teacher status
     const teachersToCreate = teachers.filter(teacher => {
       // Check if this is the admin teacher (general teacher for all classes)
       const isAdminTeacher = teacher.classses.toUpperCase() === schoolPrefix.toUpperCase()
 
       if (isAdminTeacher) {
-        return true // Always include admin teacher
+        // Skip admin teacher if it already exists in the system
+        if (adminTeacherExists) {
+          console.log(`${getTimestamp()} Skipping admin teacher ${teacher.username} - already exists in system`)
+          return false
+        }
+        // Create admin teacher if it doesn't exist
+        console.log(`${getTimestamp()} Will create admin teacher ${teacher.username}`)
+        return true
       }
 
       // Check if teacher's class already exists
@@ -858,7 +862,7 @@ export class MigrationService {
       return !classExists
     })
 
-    console.log(`${getTimestamp()} Teachers to create: ${teachersToCreate.length} (skipped ${teachers.length - teachersToCreate.length} for existing classes)`)
+    console.log(`${getTimestamp()} Teachers to create: ${teachersToCreate.length} (skipped ${teachers.length - teachersToCreate.length} for existing classes/admin)`)
 
     // Preserve original order from Excel file by adding index
     students.forEach((student, index) => {

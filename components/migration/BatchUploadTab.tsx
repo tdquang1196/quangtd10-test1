@@ -9,7 +9,6 @@ interface SchoolForm {
     id: string
     file: File | null
     schoolPrefix: string
-    createAdminTeacher: boolean
 }
 
 interface BatchSubscriptionConfig {
@@ -27,7 +26,7 @@ interface BatchUploadTabProps {
 
 export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTabProps) {
     const [schools, setSchools] = useState<SchoolForm[]>([
-        { id: crypto.randomUUID(), file: null, schoolPrefix: '', createAdminTeacher: true }
+        { id: crypto.randomUUID(), file: null, schoolPrefix: '' }
     ])
 
     // Subscription configuration
@@ -71,8 +70,7 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
         setSchools([...schools, {
             id: crypto.randomUUID(),
             file: null,
-            schoolPrefix: '',
-            createAdminTeacher: true
+            schoolPrefix: ''
         }])
     }
 
@@ -153,8 +151,8 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                     <label
                                         htmlFor={`file-${school.id}`}
                                         className={`flex items-center justify-center gap-3 px-4 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-all ${school.file
-                                                ? 'border-green-400 bg-green-50 text-green-700'
-                                                : 'border-gray-300 hover:border-blue-400 bg-gray-50 hover:bg-blue-50 text-gray-600'
+                                            ? 'border-green-400 bg-green-50 text-green-700'
+                                            : 'border-gray-300 hover:border-blue-400 bg-gray-50 hover:bg-blue-50 text-gray-600'
                                             }`}
                                     >
                                         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -179,25 +177,6 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                     className="uppercase"
                                 />
                                 <p className="text-xs text-gray-500 mt-1">Used for username generation</p>
-                            </div>
-
-                            {/* Create Admin Teacher */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Admin Teacher Account
-                                </label>
-                                <label className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
-                                    <input
-                                        type="checkbox"
-                                        checked={school.createAdminTeacher}
-                                        onChange={(e) => updateSchool(school.id, { createAdminTeacher: e.target.checked })}
-                                        className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                                    />
-                                    <div>
-                                        <span className="text-sm font-medium text-gray-900">Create admin teacher</span>
-                                        <p className="text-xs text-gray-500">Account for managing all classes</p>
-                                    </div>
-                                </label>
                             </div>
                         </div>
                     </Card>

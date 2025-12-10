@@ -7,7 +7,6 @@ interface UploadTabProps {
   file: File | null
   schoolPrefix: string
   errors: Array<{ row: number; message: string }>
-  includeAdminTeacher: boolean
   enableAutoSubscription: boolean
   subscriptionId: string
   subscriptionDescription: string
@@ -21,7 +20,6 @@ interface UploadTabProps {
     readAllSheets: boolean
   }
   setSchoolPrefix: (prefix: string) => void
-  setIncludeAdminTeacher: (include: boolean) => void
   setEnableAutoSubscription: (enable: boolean) => void
   setSubscriptionId: (id: string) => void
   setSubscriptionDescription: (desc: string) => void
@@ -41,7 +39,6 @@ export default function UploadTab({
   file,
   schoolPrefix,
   errors,
-  includeAdminTeacher,
   enableAutoSubscription,
   subscriptionId,
   subscriptionDescription,
@@ -49,7 +46,6 @@ export default function UploadTab({
   subscriptionSource,
   excelConfig,
   setSchoolPrefix,
-  setIncludeAdminTeacher,
   setEnableAutoSubscription,
   setSubscriptionId,
   setSubscriptionDescription,
@@ -232,25 +228,6 @@ export default function UploadTab({
               </div>
             </div>
           </Card>
-
-          {/* Admin Teacher Checkbox */}
-          <div className="flex items-start gap-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-            <input
-              type="checkbox"
-              id="admin-teacher-checkbox"
-              checked={includeAdminTeacher}
-              onChange={(e) => setIncludeAdminTeacher(e.target.checked)}
-              className="mt-1 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500 cursor-pointer"
-            />
-            <label htmlFor="admin-teacher-checkbox" className="flex-1 cursor-pointer">
-              <div className="text-sm font-semibold text-purple-900 mb-1">
-                Create Admin Teacher Account
-              </div>
-              <div className="text-xs text-purple-700">
-                Create a general teacher account (e.g., <span className="font-mono font-semibold">hytklttgv</span>) that will be added to all classes
-              </div>
-            </label>
-          </div>
 
           {/* Auto Subscription Assignment */}
           <div className="border-2 border-green-200 rounded-lg overflow-hidden">
