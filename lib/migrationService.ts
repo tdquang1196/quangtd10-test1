@@ -752,8 +752,11 @@ export class MigrationService {
 
       console.log(`Assigning ${teacherIds.length} teachers to Teacher role...`)
 
-      // Get all roles
-      const roles = await this.getRoles()
+      // Get all roles with retry
+      const roles = await retryWithBackoff(
+        () => this.getRoles(),
+        { context: 'Get roles', maxRetries: 3 }
+      )
 
       // Find the Teacher role (by name)
       const teacherRole = roles.find(r => r.name.toLowerCase() === 'teacher' || r.name.toLowerCase() === 'giáo viên')
@@ -778,8 +781,11 @@ export class MigrationService {
         userIds: allUserIds
       }
 
-      // Save updated role
-      const success = await this.saveRole(saveCommand)
+      // Save updated role with retry (5 attempts with exponential backoff)
+      const success = await retryWithBackoff(
+        () => this.saveRole(saveCommand),
+        { context: `Save role "${teacherRole.name}"`, maxRetries: 5 }
+      )
 
       if (success) {
         console.log(`✓ Successfully assigned ${teacherIds.length} teachers to role "${teacherRole.name}"`)
@@ -788,7 +794,7 @@ export class MigrationService {
 
       return success
     } catch (error: any) {
-      console.error('Failed to assign teachers to role:', error.message)
+      console.error('Failed to assign teachers to role after retries:', error.message)
       return false
     }
   }
