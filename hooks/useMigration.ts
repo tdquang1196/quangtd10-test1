@@ -1026,6 +1026,48 @@ export const useMigration = () => {
     }
   }
 
+  // Retry role assignment for teachers
+  const retryRoleAssignment = async () => {
+    if (!result) {
+      showNotification('No migration result found', 'warning')
+      return
+    }
+
+    setIsCreating(true)
+    setProgressMessage('Retrying teacher role assignment...')
+
+    try {
+      const token = localStorage.getItem('auth_token')
+      const response = await axios.post('/api/migrate/retry-role-assignment', {
+        teachers: result.ListDataTeacher
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      if (response.data.success) {
+        // Update result to remove role assignment error
+        setResult({
+          ...result,
+          roleAssignmentError: undefined
+        })
+        showNotification('✅ Successfully assigned teachers to role!', 'success')
+      } else {
+        showNotification(`❌ Role assignment failed: ${response.data.error}`, 'error')
+      }
+    } catch (error: any) {
+      console.error('Retry role assignment error:', error)
+      showNotification(
+        `Failed to retry role assignment: ${error.response?.data?.message || error.message}`,
+        'error'
+      )
+    } finally {
+      setIsCreating(false)
+      setProgressMessage('')
+    }
+  }
+
   return {
     // State
     file,
@@ -1074,6 +1116,7 @@ export const useMigration = () => {
     handleCreateBatch,
     retryBatchSchoolPackages,
     retryFailedUsers,
+    retryRoleAssignment,
     // Subscription actions
     setEnableAutoSubscription,
     setSubscriptionId,

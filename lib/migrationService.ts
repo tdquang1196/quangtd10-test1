@@ -108,7 +108,7 @@ const MAX_LENGTH_DISPLAY_NAME = 20
 // Rate limiting configuration
 const REGISTER_RATE = 2 // 2 requests/second for register API
 const LOGIN_RATE = 2 // 2 requests/second for login API
-const MAX_CONCURRENT_GROUPS = 10 // Maximum number of display name groups to process in parallel
+const MAX_CONCURRENT_GROUPS = 5 // Maximum number of display name groups to process in parallel
 
 /**
  * Throttled dispatcher for rate-limited parallel request dispatching.
@@ -218,7 +218,7 @@ export class MigrationService {
     return batches
   }
 
-  private async loginAdmin(): Promise<void> {
+  public async loginAdmin(): Promise<void> {
     // Skip if already logged in (cache for reused instances)
     if (this.adminToken && this.adminClient) {
       console.log('✓ Admin already logged in, reusing token')
@@ -743,7 +743,7 @@ export class MigrationService {
    * Assign teachers to the Teacher role
    * Only adds teacher user IDs to the role's userIds list
    */
-  private async assignTeachersToRole(teacherIds: string[]): Promise<boolean> {
+  public async assignTeachersToRole(teacherIds: string[]): Promise<boolean> {
     try {
       if (teacherIds.length === 0) {
         console.log('No teachers to assign to role')

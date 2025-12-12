@@ -49,6 +49,7 @@ export interface MigrationResult {
   ListDataClasses: any[]
   ListUserError: MigrationError[]
   ListClassError?: any[]
+  roleAssignmentError?: string
 }
 
 // Component props types

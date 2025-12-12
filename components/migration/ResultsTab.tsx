@@ -17,6 +17,7 @@ interface ResultsTabProps {
   } | null
   retryFailedPackages?: () => Promise<void>
   retryFailedUsers?: () => Promise<void>
+  retryRoleAssignment?: () => Promise<void>
   isRetrying?: boolean
 }
 
@@ -30,6 +31,7 @@ export default function ResultsTab({
   packageAssignmentResult = null,
   retryFailedPackages,
   retryFailedUsers,
+  retryRoleAssignment,
   isRetrying = false
 }: ResultsTabProps) {
   // Package assignment tracking
@@ -486,6 +488,55 @@ export default function ResultsTab({
             onError={handlePackageError}
           />
         </>
+      )}
+
+      {/* Role Assignment Error */}
+      {result?.roleAssignmentError && (
+        <Card className="border-2 border-orange-300 bg-orange-50">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold text-orange-900 text-lg">Teacher Role Assignment Failed</h3>
+                <p className="text-sm text-orange-700 mt-1">
+                  {result.roleAssignmentError}
+                </p>
+                <p className="text-xs text-orange-600 mt-2">
+                  Teachers were created successfully but could not be assigned to the "Teacher" role.
+                  This may be due to a network timeout or server issue.
+                </p>
+              </div>
+              {retryRoleAssignment && (
+                <Button
+                  onClick={retryRoleAssignment}
+                  variant="secondary"
+                  size="md"
+                  disabled={isRetrying}
+                  icon={
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  }
+                >
+                  {isRetrying ? 'Retrying...' : 'Retry Role Assignment'}
+                </Button>
+              )}
+            </div>
+            <div className="mt-4 bg-white rounded-lg border border-orange-200 p-4">
+              <h4 className="text-sm font-semibold text-orange-900 mb-2">What this means:</h4>
+              <ul className="text-sm text-orange-800 space-y-1 list-disc list-inside">
+                <li>Teacher accounts were created successfully</li>
+                <li>Teachers can log in and access the system</li>
+                <li>However, they were not assigned to the "Teacher" role automatically</li>
+                <li>Click "Retry Role Assignment" to try again</li>
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Failed Users */}

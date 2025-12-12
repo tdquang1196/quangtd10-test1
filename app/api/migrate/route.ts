@@ -88,7 +88,8 @@ export async function POST(request: NextRequest) {
       ListDataTeacher: result.listDataTeacher,
       ListDataClasses: result.listDataClasses,
       ListUserError: result.listUserError,
-      ListClassError: result.listClassError
+      ListClassError: result.listClassError,
+      roleAssignmentError: result.roleAssignmentError
     }
 
     return NextResponse.json(response)
