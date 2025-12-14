@@ -32,6 +32,17 @@ export const FEATURES: Feature[] = [
     route: '/features/batch-send-package',
     status: 'active',
     category: 'tools'
+  },
+  {
+    id: 'fb-auto-comment',
+    title: 'FB Auto Comment',
+    description: 'Tự động comment vào tất cả posts/reels của Facebook Page. Hỗ trợ emoji, hẹn giờ, và tracking comments đã post.',
+    icon: '💬',
+    color: 'blue',
+    gradient: 'from-blue-600 to-cyan-500',
+    route: '/features/fb-auto-comment',
+    status: 'active',
+    category: 'tools'
   }
 ]
 
