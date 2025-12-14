@@ -1,32 +1,16 @@
 /**
  * Server-side scheduler for FB Auto Comment
- * Runs in the background even when browser is closed
+ * Now receives config and comments from client (no file storage)
  */
 
-import { SchedulerStatus, AutoCommentResult, ScanMode, ScanState } from './types';
-import {
-    getConfig,
-    getComments,
-    isAlreadyCommented,
-    markAsCommented,
-    addLog,
-    getTracking,
-    saveTracking,
-    getScanState,
-    saveScanState,
-    resetScanState
-} from './storage';
+import { SchedulerStatus, AutoCommentResult, ScanMode, FBConfig } from './types';
 import {
     getAllContent,
     getPageCommentsOnPost,
     postComment
 } from './facebook';
 
-// Global scan mode
-let currentScanMode: ScanMode = 'continue';
-
-// Global scheduler state (persists as long as server runs)
-let schedulerInterval: ReturnType<typeof setInterval> | null = null;
+// Global scheduler state (in-memory, persists as long as server runs)
 let schedulerStatus: SchedulerStatus = {
     isRunning: false,
     currentRun: 0,
@@ -35,9 +19,56 @@ let schedulerStatus: SchedulerStatus = {
     nextRunAt: null,
 };
 
-// Abort control
+// Process control
 let abortFlag = false;
 let isProcessRunning = false;
+
+// In-memory logs (temporary, for current session)
+let logsStore: LogEntry[] = [];
+const MAX_LOGS = 200;
+
+interface LogEntry {
+    timestamp: string;
+    type: 'info' | 'success' | 'warning' | 'error';
+    message: string;
+}
+
+// In-memory tracking (posts already commented in this session)
+let commentedPosts: Map<string, string[]> = new Map();
+
+// Scan state (in-memory)
+let scanState = {
+    lastProcessedPostTime: null as string | null,
+    totalPostsProcessed: 0
+};
+
+/**
+ * Add log entry (in-memory)
+ */
+function addLog(type: LogEntry['type'], message: string): void {
+    logsStore.push({
+        timestamp: new Date().toISOString(),
+        type,
+        message,
+    });
+    if (logsStore.length > MAX_LOGS) {
+        logsStore = logsStore.slice(-MAX_LOGS);
+    }
+}
+
+/**
+ * Get logs
+ */
+export function getLogs(): LogEntry[] {
+    return [...logsStore];
+}
+
+/**
+ * Clear logs
+ */
+export function clearLogs(): void {
+    logsStore = [];
+}
 
 /**
  * Get current scheduler status
@@ -47,17 +78,10 @@ export function getSchedulerStatus(): SchedulerStatus {
 }
 
 /**
- * Set scan mode for next run
+ * Check if process is currently running
  */
-export function setScanMode(mode: ScanMode): void {
-    currentScanMode = mode;
-}
-
-/**
- * Get current scan mode
- */
-export function getScanMode(): ScanMode {
-    return currentScanMode;
+export function getIsProcessRunning(): boolean {
+    return isProcessRunning;
 }
 
 /**
@@ -69,17 +93,54 @@ export function requestAbort(): void {
 }
 
 /**
- * Check if process is currently running
+ * Stop scheduler
  */
-export function getIsProcessRunning(): boolean {
-    return isProcessRunning;
+export function stopScheduler(): void {
+    schedulerStatus.isRunning = false;
+    requestAbort();
+}
+
+/**
+ * Get first N words for comparison
+ */
+function getFirstNWords(text: string, n: number = 10): string {
+    return text
+        .trim()
+        .toLowerCase()
+        .split(/\s+/)
+        .slice(0, n)
+        .join(' ');
+}
+
+/**
+ * Check if already commented (in-memory tracking)
+ */
+function isAlreadyCommented(postId: string, message: string): boolean {
+    const commented = commentedPosts.get(postId) || [];
+    const messagePrefix = getFirstNWords(message, 10);
+    return commented.some(m => getFirstNWords(m, 10) === messagePrefix);
+}
+
+/**
+ * Mark as commented (in-memory tracking)
+ */
+function markAsCommented(postId: string, message: string): void {
+    const commented = commentedPosts.get(postId) || [];
+    commented.push(message);
+    commentedPosts.set(postId, commented);
 }
 
 /**
  * Run the auto-comment process once
  * @param scanMode - 'full' to scan all posts, 'continue' to scan only new posts
+ * @param config - Config from client
+ * @param comments - Comments from client
  */
-export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<AutoCommentResult> {
+export async function runAutoComment(
+    scanMode: ScanMode = 'continue',
+    config: FBConfig,
+    comments: string[]
+): Promise<AutoCommentResult> {
     // Prevent multiple runs
     if (isProcessRunning) {
         addLog('warning', 'Đang có quá trình khác chạy, vui lòng đợi...');
@@ -101,29 +162,14 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
         errors: [],
     };
 
-    const config = getConfig();
-    const comments = getComments();
-    const scanState = getScanState();
-
-    if (!config) {
-        result.errors.push('Chưa cấu hình Access Token và Page ID');
-        addLog('error', 'Chưa cấu hình Access Token và Page ID');
-        return result;
-    }
-
-    if (comments.length === 0) {
-        result.errors.push('Chưa có comment nào trong danh sách');
-        addLog('error', 'Chưa có comment nào trong danh sách');
-        return result;
-    }
-
-    // Log scan mode
+    // Reset tracking for full scan
     if (scanMode === 'full') {
         addLog('info', `🔄 CHẾ ĐỘ: Quét toàn bộ từ đầu`);
-        resetScanState();
+        commentedPosts.clear();
+        scanState = { lastProcessedPostTime: null, totalPostsProcessed: 0 };
     } else {
-        if (scanState.lastScanAt) {
-            addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp từ ${new Date(scanState.lastScanAt).toLocaleString('vi-VN')}`);
+        if (scanState.lastProcessedPostTime) {
+            addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp từ ${new Date(scanState.lastProcessedPostTime).toLocaleString('vi-VN')}`);
         } else {
             addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp (lần đầu)`);
         }
@@ -152,6 +198,7 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
 
         if (allContent.length === 0) {
             addLog('success', '✨ Không có posts mới nào cần xử lý!');
+            isProcessRunning = false;
             return result;
         }
 
@@ -176,23 +223,19 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
 
             addLog('info', `📄 [Post ${postIndex + 1}/${allContent.length}] ${postPreview}`);
 
-            // Get existing comments from page
+            // Get existing comments from page (to sync tracking)
             const existingComments = await getPageCommentsOnPost(
                 post.id,
                 config.pageId,
                 config.accessToken
             );
 
-            // Sync with tracking
-            const tracking = getTracking();
-            if (!tracking.has(post.id)) {
-                tracking.set(post.id, {
-                    postId: post.id,
-                    commentedMessages: existingComments,
-                    lastUpdated: new Date().toISOString(),
-                });
-                saveTracking(tracking);
-            }
+            // Sync existing comments to tracking
+            existingComments.forEach(c => {
+                if (!isAlreadyCommented(post.id, c)) {
+                    markAsCommented(post.id, c);
+                }
+            });
 
             // Process each comment
             for (let cmtIndex = 0; cmtIndex < comments.length; cmtIndex++) {
@@ -231,119 +274,21 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
             // Check for abort after post
             if (abortFlag) break;
 
-            // Save scan state after each post
-            saveScanState({
-                lastProcessedPostId: post.id,
-                lastProcessedPostTime: post.created_time,
-                totalPostsProcessed: getScanState().totalPostsProcessed + 1,
-            });
+            // Update scan state
+            scanState.lastProcessedPostTime = post.created_time;
+            scanState.totalPostsProcessed++;
         }
 
-        // Save final scan state
         if (!abortFlag) {
-            saveScanState({
-                lastScanAt: new Date().toISOString(),
-            });
-            addLog('success', `Hoàn thành: ${result.commentsPosted} posted, ${result.commentsSkipped} skipped`);
+            addLog('success', `🎉 Hoàn thành: ${result.commentsPosted} posted, ${result.commentsSkipped} skipped`);
         }
     } catch (error: any) {
         result.errors.push(error.message);
         addLog('error', `Lỗi: ${error.message}`);
     } finally {
-        // Always reset process state
         isProcessRunning = false;
         abortFlag = false;
     }
 
     return result;
-}
-
-/**
- * Start the scheduler
- */
-export function startScheduler(intervalSeconds: number, maxRuns: number): boolean {
-    if (schedulerInterval) {
-        return false; // Already running
-    }
-
-    const config = getConfig();
-    const comments = getComments();
-
-    if (!config) {
-        addLog('error', 'Không thể bắt đầu scheduler: Chưa cấu hình');
-        return false;
-    }
-
-    if (comments.length === 0) {
-        addLog('error', 'Không thể bắt đầu scheduler: Chưa có comments');
-        return false;
-    }
-
-    schedulerStatus = {
-        isRunning: true,
-        currentRun: 0,
-        maxRuns,
-        lastRunAt: null,
-        nextRunAt: new Date(Date.now() + 1000).toISOString(), // Start in 1 second
-    };
-
-    addLog('info', `Scheduler bắt đầu: mỗi ${intervalSeconds}s, ${maxRuns > 0 ? `tối đa ${maxRuns} lần` : 'vô hạn'}`);
-
-    // Run immediately
-    setTimeout(async () => {
-        await executeScheduledRun();
-    }, 1000);
-
-    // Set interval for subsequent runs
-    schedulerInterval = setInterval(async () => {
-        if (schedulerStatus.isRunning) {
-            await executeScheduledRun();
-        }
-    }, intervalSeconds * 1000);
-
-    return true;
-}
-
-async function executeScheduledRun() {
-    if (!schedulerStatus.isRunning) return;
-
-    schedulerStatus.currentRun++;
-    schedulerStatus.lastRunAt = new Date().toISOString();
-
-    addLog('info', `[Lần ${schedulerStatus.currentRun}${schedulerStatus.maxRuns > 0 ? '/' + schedulerStatus.maxRuns : ''}] Bắt đầu (${currentScanMode === 'full' ? 'Quét toàn bộ' : 'Quét tiếp'})...`);
-
-    await runAutoComment(currentScanMode);
-
-    // Check if should stop
-    if (schedulerStatus.maxRuns > 0 && schedulerStatus.currentRun >= schedulerStatus.maxRuns) {
-        stopScheduler();
-        addLog('success', 'Scheduler hoàn thành tất cả các lần chạy');
-    } else if (schedulerStatus.isRunning) {
-        // Calculate next run time
-        const config = getConfig();
-        if (config) {
-            schedulerStatus.nextRunAt = new Date(Date.now() + 60000).toISOString(); // Placeholder
-        }
-    }
-}
-
-/**
- * Stop the scheduler
- */
-export function stopScheduler(): void {
-    if (schedulerInterval) {
-        clearInterval(schedulerInterval);
-        schedulerInterval = null;
-    }
-
-    const runs = schedulerStatus.currentRun;
-    schedulerStatus = {
-        isRunning: false,
-        currentRun: runs,
-        maxRuns: 0,
-        lastRunAt: schedulerStatus.lastRunAt,
-        nextRunAt: null,
-    };
-
-    addLog('warning', `Scheduler đã dừng sau ${runs} lần chạy`);
 }

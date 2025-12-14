@@ -77,72 +77,84 @@ export default function FBAutoCommentPage() {
         }
     }, [isProcessRunning, schedulerStatus?.isRunning]);
 
+    // Load data from localStorage on mount
     const loadData = async () => {
+        // Load from localStorage
         try {
-            const [configRes, statusRes] = await Promise.all([
-                fetch('/api/fb-auto-comment'),
-                fetch('/api/fb-auto-comment/scheduler'),
-            ]);
-
-            const configData = await configRes.json();
-            const statusData = await statusRes.json();
-
-            if (configData.config) {
-                setAccessToken(configData.config.accessToken || '');
-                setPageId(configData.config.pageId || '');
-                setDelay(configData.config.delayBetweenComments || 5);
+            const savedConfig = localStorage.getItem('fb-auto-comment-config');
+            if (savedConfig) {
+                const config = JSON.parse(savedConfig);
+                setAccessToken(config.accessToken || '');
+                setPageId(config.pageId || '');
+                setDelay(config.delayBetweenComments || 5);
             }
 
-            // Deduplicate comments in case of any duplicates
-            const rawComments: string[] = configData.comments || [];
-            const uniqueComments = [...new Set(rawComments)];
-            setComments(uniqueComments);
-            setLogs(configData.logs || []);
+            const savedComments = localStorage.getItem('fb-auto-comment-comments');
+            if (savedComments) {
+                const rawComments: string[] = JSON.parse(savedComments) || [];
+                const uniqueComments = [...new Set(rawComments)];
+                setComments(uniqueComments);
+            }
+
+            const savedLogs = localStorage.getItem('fb-auto-comment-logs');
+            if (savedLogs) {
+                setLogs(JSON.parse(savedLogs) || []);
+            }
+
+            const savedScanState = localStorage.getItem('fb-auto-comment-scan-state');
+            if (savedScanState) {
+                setScanState(JSON.parse(savedScanState));
+            }
+        } catch (error) {
+            console.error('Error loading from localStorage:', error);
+        }
+
+        // Check server status
+        try {
+            const statusRes = await fetch('/api/fb-auto-comment/scheduler');
+            const statusData = await statusRes.json();
             setSchedulerStatus(statusData.status);
-            setScanState(statusData.scanState || null);
             setIsProcessRunning(statusData.isProcessRunning || false);
         } catch (error) {
-            console.error('Error loading data:', error);
+            console.error('Error checking server status:', error);
+        }
+    };
+
+    // Save to localStorage helpers
+    const saveToLocalStorage = (key: string, data: any) => {
+        try {
+            localStorage.setItem(`fb-auto-comment-${key}`, JSON.stringify(data));
+        } catch (error) {
+            console.error('Error saving to localStorage:', error);
         }
     };
 
     const refreshStatus = async () => {
         try {
-            // Only fetch scheduler status
             const statusRes = await fetch('/api/fb-auto-comment/scheduler');
             const statusData = await statusRes.json();
 
             setSchedulerStatus(statusData.status);
-            setScanState(statusData.scanState || null);
             setIsProcessRunning(statusData.isProcessRunning || false);
 
-            // Only fetch logs if running
+            // Fetch logs from server if running
             if (statusData.isProcessRunning || statusData.status?.isRunning) {
-                const configRes = await fetch('/api/fb-auto-comment');
-                const configData = await configRes.json();
-                setLogs(configData.logs || []);
+                if (statusData.logs) {
+                    setLogs(statusData.logs);
+                    saveToLocalStorage('logs', statusData.logs);
+                }
             }
         } catch (error) {
             console.error('Error refreshing status:', error);
         }
     };
 
-    const saveConfig = async () => {
+    const saveConfig = () => {
+        const config = { accessToken, pageId, delayBetweenComments: delay };
+        saveToLocalStorage('config', config);
+        // Show feedback
         setLoading(true);
-        try {
-            await fetch('/api/fb-auto-comment', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'saveConfig',
-                    data: { accessToken, pageId, delayBetweenComments: delay },
-                }),
-            });
-            await refreshStatus();
-        } catch (error) {
-            console.error('Error saving config:', error);
-        }
-        setLoading(false);
+        setTimeout(() => setLoading(false), 300);
     };
 
     const verifyConnection = async () => {
@@ -162,10 +174,11 @@ export default function FBAutoCommentPage() {
             if (data.success) {
                 setConnectionStatus('success');
                 setPageName(data.pageName);
+                // Save config on successful verify
+                saveConfig();
             } else {
                 setConnectionStatus('error');
             }
-            await refreshStatus();
         } catch (error) {
             setConnectionStatus('error');
         }
@@ -179,13 +192,13 @@ export default function FBAutoCommentPage() {
         const updated = [...comments, newComment.trim()];
         setComments(updated);
         setNewComment('');
-        saveComments(updated);
+        saveToLocalStorage('comments', updated);
     };
 
     const removeComment = (index: number) => {
         const updated = comments.filter((_, i) => i !== index);
         setComments(updated);
-        saveComments(updated);
+        saveToLocalStorage('comments', updated);
     };
 
     const moveComment = (index: number, direction: number) => {
@@ -195,31 +208,31 @@ export default function FBAutoCommentPage() {
         const updated = [...comments];
         [updated[index], updated[newIndex]] = [updated[newIndex], updated[index]];
         setComments(updated);
-        saveComments(updated);
-    };
-
-    const saveComments = async (commentsList: string[]) => {
-        try {
-            await fetch('/api/fb-auto-comment', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'saveComments',
-                    data: { comments: commentsList },
-                }),
-            });
-        } catch (error) {
-            console.error('Error saving comments:', error);
-        }
+        saveToLocalStorage('comments', updated);
     };
 
     const runOnce = async () => {
+        if (!accessToken || !pageId) {
+            alert('Vui lòng cấu hình Access Token và Page ID trước!');
+            return;
+        }
+        if (comments.length === 0) {
+            alert('Vui lòng thêm ít nhất 1 comment!');
+            return;
+        }
+
         setLoading(true);
         try {
+            // Send config and comments to server
             await fetch('/api/fb-auto-comment/scheduler', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'runOnce', scanMode }),
+                body: JSON.stringify({
+                    action: 'runOnce',
+                    scanMode,
+                    config: { accessToken, pageId, delayBetweenComments: delay },
+                    comments,
+                }),
             });
             await refreshStatus();
         } catch (error) {
@@ -282,6 +295,7 @@ export default function FBAutoCommentPage() {
                 body: JSON.stringify({ action: 'clearLogs' }),
             });
             setLogs([]);
+            saveToLocalStorage('logs', []);
         } catch (error) {
             console.error('Error clearing logs:', error);
         }
@@ -319,7 +333,7 @@ export default function FBAutoCommentPage() {
             });
 
             setComments(updated);
-            saveComments(updated);
+            saveToLocalStorage('comments', updated);
         };
         reader.readAsText(file);
         e.target.value = '';
