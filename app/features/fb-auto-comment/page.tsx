@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 
 interface SchedulerStatus {
@@ -48,12 +48,34 @@ export default function FBAutoCommentPage() {
     const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [pageName, setPageName] = useState('');
 
-    // Load data on mount
+    // Polling interval ref
+    const pollingRef = useRef<NodeJS.Timeout | null>(null);
+
+    // Load data on mount (only once)
     useEffect(() => {
         loadData();
-        const interval = setInterval(refreshStatus, 5000);
-        return () => clearInterval(interval);
+        return () => {
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+            }
+        };
     }, []);
+
+    // Start/stop polling based on running state
+    useEffect(() => {
+        if (isProcessRunning || schedulerStatus?.isRunning) {
+            // Start polling when running
+            if (!pollingRef.current) {
+                pollingRef.current = setInterval(refreshStatus, 2000); // Faster when running
+            }
+        } else {
+            // Stop polling when not running
+            if (pollingRef.current) {
+                clearInterval(pollingRef.current);
+                pollingRef.current = null;
+            }
+        }
+    }, [isProcessRunning, schedulerStatus?.isRunning]);
 
     const loadData = async () => {
         try {
@@ -78,6 +100,7 @@ export default function FBAutoCommentPage() {
             setLogs(configData.logs || []);
             setSchedulerStatus(statusData.status);
             setScanState(statusData.scanState || null);
+            setIsProcessRunning(statusData.isProcessRunning || false);
         } catch (error) {
             console.error('Error loading data:', error);
         }
@@ -85,18 +108,20 @@ export default function FBAutoCommentPage() {
 
     const refreshStatus = async () => {
         try {
-            const [configRes, statusRes] = await Promise.all([
-                fetch('/api/fb-auto-comment'),
-                fetch('/api/fb-auto-comment/scheduler'),
-            ]);
-
-            const configData = await configRes.json();
+            // Only fetch scheduler status
+            const statusRes = await fetch('/api/fb-auto-comment/scheduler');
             const statusData = await statusRes.json();
 
-            setLogs(configData.logs || []);
             setSchedulerStatus(statusData.status);
             setScanState(statusData.scanState || null);
             setIsProcessRunning(statusData.isProcessRunning || false);
+
+            // Only fetch logs if running
+            if (statusData.isProcessRunning || statusData.status?.isRunning) {
+                const configRes = await fetch('/api/fb-auto-comment');
+                const configData = await configRes.json();
+                setLogs(configData.logs || []);
+            }
         } catch (error) {
             console.error('Error refreshing status:', error);
         }
