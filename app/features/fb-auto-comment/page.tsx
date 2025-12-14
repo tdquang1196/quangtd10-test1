@@ -51,12 +51,19 @@ export default function FBAutoCommentPage() {
     // Polling interval ref
     const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Client-side scheduler (runs in browser)
+    const schedulerRef = useRef<NodeJS.Timeout | null>(null);
+    const [schedulerRunCount, setSchedulerRunCount] = useState(0);
+
     // Load data on mount (only once)
     useEffect(() => {
         loadData();
         return () => {
             if (pollingRef.current) {
                 clearInterval(pollingRef.current);
+            }
+            if (schedulerRef.current) {
+                clearInterval(schedulerRef.current);
             }
         };
     }, []);
@@ -134,15 +141,12 @@ export default function FBAutoCommentPage() {
             const statusRes = await fetch('/api/fb-auto-comment/scheduler');
             const statusData = await statusRes.json();
 
-            setSchedulerStatus(statusData.status);
             setIsProcessRunning(statusData.isProcessRunning || false);
 
-            // Fetch logs from server if running
-            if (statusData.isProcessRunning || statusData.status?.isRunning) {
-                if (statusData.logs) {
-                    setLogs(statusData.logs);
-                    saveToLocalStorage('logs', statusData.logs);
-                }
+            // Always update logs from server
+            if (statusData.logs && statusData.logs.length > 0) {
+                setLogs(statusData.logs);
+                saveToLocalStorage('logs', statusData.logs);
             }
         } catch (error) {
             console.error('Error refreshing status:', error);
@@ -222,9 +226,23 @@ export default function FBAutoCommentPage() {
         }
 
         setLoading(true);
+        setIsProcessRunning(true);
+
+        // Start polling for logs
+        const pollInterval = setInterval(async () => {
+            try {
+                const res = await fetch('/api/fb-auto-comment/scheduler');
+                const data = await res.json();
+                if (data.logs && data.logs.length > 0) {
+                    setLogs(data.logs);
+                }
+                setIsProcessRunning(data.isProcessRunning || false);
+            } catch (e) { }
+        }, 1000);
+
         try {
             // Send config and comments to server
-            await fetch('/api/fb-auto-comment/scheduler', {
+            const res = await fetch('/api/fb-auto-comment/scheduler', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -234,42 +252,126 @@ export default function FBAutoCommentPage() {
                     comments,
                 }),
             });
-            await refreshStatus();
+            const data = await res.json();
+
+            // Update logs from response
+            if (data.logs && data.logs.length > 0) {
+                setLogs(data.logs);
+                saveToLocalStorage('logs', data.logs);
+            }
         } catch (error) {
             console.error('Error running:', error);
+        }
+
+        clearInterval(pollInterval);
+        setLoading(false);
+        setIsProcessRunning(false);
+    };
+
+    // Execute one scheduled run
+    const executeScheduledRun = async () => {
+        if (!accessToken || !pageId || comments.length === 0) return;
+
+        setLoading(true);
+        try {
+            const res = await fetch('/api/fb-auto-comment/scheduler', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'runOnce',
+                    scanMode,
+                    config: { accessToken, pageId, delayBetweenComments: delay },
+                    comments,
+                }),
+            });
+            const data = await res.json();
+            if (data.logs) {
+                setLogs(data.logs);
+                saveToLocalStorage('logs', data.logs);
+            }
+        } catch (error) {
+            console.error('Error in scheduled run:', error);
         }
         setLoading(false);
     };
 
-    const startScheduler = async () => {
-        try {
-            await fetch('/api/fb-auto-comment/scheduler', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'start',
-                    intervalSeconds,
-                    maxRuns,
-                    scanMode,
-                }),
-            });
-            await refreshStatus();
-        } catch (error) {
-            console.error('Error starting scheduler:', error);
+    const startScheduler = () => {
+        if (!accessToken || !pageId) {
+            alert('Vui lòng cấu hình Access Token và Page ID trước!');
+            return;
         }
+        if (comments.length === 0) {
+            alert('Vui lòng thêm ít nhất 1 comment!');
+            return;
+        }
+        if (schedulerRef.current) {
+            return; // Already running
+        }
+
+        // Update status
+        setSchedulerStatus({
+            isRunning: true,
+            currentRun: 0,
+            maxRuns,
+            lastRunAt: null,
+            nextRunAt: new Date(Date.now() + 1000).toISOString(),
+        });
+        setSchedulerRunCount(0);
+
+        // Run first time after 1 second
+        setTimeout(async () => {
+            await executeScheduledRun();
+            setSchedulerRunCount(1);
+            setSchedulerStatus(prev => prev ? {
+                ...prev,
+                currentRun: 1,
+                lastRunAt: new Date().toISOString(),
+                nextRunAt: new Date(Date.now() + intervalSeconds * 1000).toISOString(),
+            } : null);
+        }, 1000);
+
+        // Setup interval for subsequent runs
+        schedulerRef.current = setInterval(async () => {
+            setSchedulerRunCount(prev => {
+                const newCount = prev + 1;
+
+                // Check if should stop
+                if (maxRuns > 0 && newCount > maxRuns) {
+                    stopScheduler();
+                    return prev;
+                }
+
+                // Update status and run
+                setSchedulerStatus(s => s ? {
+                    ...s,
+                    currentRun: newCount,
+                    lastRunAt: new Date().toISOString(),
+                    nextRunAt: new Date(Date.now() + intervalSeconds * 1000).toISOString(),
+                } : null);
+
+                executeScheduledRun();
+                return newCount;
+            });
+        }, intervalSeconds * 1000);
     };
 
-    const stopScheduler = async () => {
-        try {
-            await fetch('/api/fb-auto-comment/scheduler', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'stop' }),
-            });
-            await refreshStatus();
-        } catch (error) {
-            console.error('Error stopping scheduler:', error);
+    const stopScheduler = () => {
+        if (schedulerRef.current) {
+            clearInterval(schedulerRef.current);
+            schedulerRef.current = null;
         }
+        setSchedulerStatus(prev => prev ? {
+            ...prev,
+            isRunning: false,
+            nextRunAt: null,
+        } : null);
+
+        // Also abort any running process on server
+        fetch('/api/fb-auto-comment/scheduler', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'abort' }),
+        }).catch(() => { });
     };
 
     const abortProcess = async () => {
