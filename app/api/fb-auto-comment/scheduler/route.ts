@@ -8,7 +8,9 @@ import {
     startScheduler,
     stopScheduler,
     runAutoComment,
-    setScanMode
+    setScanMode,
+    requestAbort,
+    getIsProcessRunning
 } from '@/lib/fb-auto-comment/scheduler';
 import { addLog, getScanState, resetScanState } from '@/lib/fb-auto-comment/storage';
 import { ScanMode } from '@/lib/fb-auto-comment/types';
@@ -18,7 +20,8 @@ export async function GET() {
     try {
         const status = getSchedulerStatus();
         const scanState = getScanState();
-        return NextResponse.json({ status, scanState });
+        const isProcessRunning = getIsProcessRunning();
+        return NextResponse.json({ status, scanState, isProcessRunning });
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -45,7 +48,12 @@ export async function POST(request: NextRequest) {
 
             case 'stop':
                 stopScheduler();
+                requestAbort(); // Also abort any running process
                 return NextResponse.json({ success: true, status: getSchedulerStatus() });
+
+            case 'abort':
+                requestAbort();
+                return NextResponse.json({ success: true, message: 'Abort requested' });
 
             case 'runOnce':
                 const runMode: ScanMode = scanMode || 'continue';

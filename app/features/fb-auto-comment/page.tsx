@@ -37,6 +37,7 @@ export default function FBAutoCommentPage() {
         lastProcessedPostTime: string | null;
         totalPostsProcessed: number;
     } | null>(null);
+    const [isProcessRunning, setIsProcessRunning] = useState(false);
 
     // Logs state
     const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -95,6 +96,7 @@ export default function FBAutoCommentPage() {
             setLogs(configData.logs || []);
             setSchedulerStatus(statusData.status);
             setScanState(statusData.scanState || null);
+            setIsProcessRunning(statusData.isProcessRunning || false);
         } catch (error) {
             console.error('Error refreshing status:', error);
         }
@@ -229,6 +231,21 @@ export default function FBAutoCommentPage() {
             await refreshStatus();
         } catch (error) {
             console.error('Error stopping scheduler:', error);
+        }
+    };
+
+    const abortProcess = async () => {
+        try {
+            await fetch('/api/fb-auto-comment/scheduler', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'abort' }),
+            });
+            // Faster polling to see abort result
+            setTimeout(refreshStatus, 500);
+            setTimeout(refreshStatus, 1500);
+        } catch (error) {
+            console.error('Error aborting:', error);
         }
     };
 
@@ -520,19 +537,34 @@ export default function FBAutoCommentPage() {
 
                         {/* Main Actions */}
                         <div className="flex flex-wrap gap-3 mb-6">
-                            <button
-                                onClick={runOnce}
-                                disabled={loading || schedulerStatus?.isRunning}
-                                className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-xl font-semibold shadow-lg shadow-green-500/30 hover:shadow-green-500/50 transition-all duration-200 disabled:opacity-50 disabled:shadow-none"
-                            >
-                                {loading ? '🔄 Đang chạy...' : scanMode === 'full' ? '🔄 Chạy toàn bộ' : '⏩ Chạy tiếp'}
-                            </button>
+                            {isProcessRunning || loading ? (
+                                <button
+                                    onClick={abortProcess}
+                                    className="px-6 py-3 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white rounded-xl font-semibold shadow-lg shadow-red-500/30 hover:shadow-red-500/50 transition-all duration-200 animate-pulse"
+                                >
+                                    ⛔ Dừng ngay
+                                </button>
+                            ) : (
+                                <button
+                                    onClick={runOnce}
+                                    disabled={schedulerStatus?.isRunning}
+                                    className="px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white rounded-xl font-semibold shadow-lg shadow-green-500/30 hover:shadow-green-500/50 transition-all duration-200 disabled:opacity-50 disabled:shadow-none"
+                                >
+                                    {scanMode === 'full' ? '🔄 Chạy toàn bộ' : '⏩ Chạy tiếp'}
+                                </button>
+                            )}
                             <button
                                 onClick={clearLogs}
                                 className="px-6 py-3 bg-white hover:bg-gray-50 text-gray-700 rounded-xl font-semibold border border-gray-200 shadow-sm hover:shadow transition-all duration-200"
                             >
                                 🗑️ Xóa logs
                             </button>
+                            {isProcessRunning && (
+                                <span className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-700 rounded-lg text-sm font-medium">
+                                    <span className="w-2 h-2 bg-amber-500 rounded-full animate-ping"></span>
+                                    Đang xử lý...
+                                </span>
+                            )}
                         </div>
 
                         {/* Scheduler Section */}

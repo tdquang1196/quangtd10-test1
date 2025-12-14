@@ -35,6 +35,10 @@ let schedulerStatus: SchedulerStatus = {
     nextRunAt: null,
 };
 
+// Abort control
+let abortFlag = false;
+let isProcessRunning = false;
+
 /**
  * Get current scheduler status
  */
@@ -57,10 +61,39 @@ export function getScanMode(): ScanMode {
 }
 
 /**
+ * Request abort of current process
+ */
+export function requestAbort(): void {
+    abortFlag = true;
+    addLog('warning', '⚠️ Đang dừng quá trình...');
+}
+
+/**
+ * Check if process is currently running
+ */
+export function getIsProcessRunning(): boolean {
+    return isProcessRunning;
+}
+
+/**
  * Run the auto-comment process once
  * @param scanMode - 'full' to scan all posts, 'continue' to scan only new posts
  */
 export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<AutoCommentResult> {
+    // Prevent multiple runs
+    if (isProcessRunning) {
+        addLog('warning', 'Đang có quá trình khác chạy, vui lòng đợi...');
+        return {
+            totalPosts: 0,
+            commentsPosted: 0,
+            commentsSkipped: 0,
+            errors: ['Process already running'],
+        };
+    }
+
+    isProcessRunning = true;
+    abortFlag = false;
+
     const result: AutoCommentResult = {
         totalPosts: 0,
         commentsPosted: 0,
@@ -129,6 +162,13 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
 
         // Process each post
         for (let postIndex = 0; postIndex < allContent.length; postIndex++) {
+            // Check for abort
+            if (abortFlag) {
+                addLog('warning', `⛔ Đã dừng! Xử lý được ${postIndex}/${allContent.length} posts`);
+                result.errors.push('Process aborted by user');
+                break;
+            }
+
             const post = allContent[postIndex];
             const postPreview = post.message
                 ? post.message.substring(0, 50) + (post.message.length > 50 ? '...' : '')
@@ -159,6 +199,12 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
                 const commentText = comments[cmtIndex];
                 const commentPreview = commentText.substring(0, 40) + (commentText.length > 40 ? '...' : '');
 
+                // Check for abort
+                if (abortFlag) {
+                    addLog('warning', `⛔ Đã dừng trong lúc comment!`);
+                    break;
+                }
+
                 if (isAlreadyCommented(post.id, commentText)) {
                     result.commentsSkipped++;
                     addLog('warning', `⏭️ [Comment ${cmtIndex + 1}] Đã có, bỏ qua: "${commentPreview}"`);
@@ -182,6 +228,9 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
                 await new Promise(r => setTimeout(r, config.delayBetweenComments * 1000));
             }
 
+            // Check for abort after post
+            if (abortFlag) break;
+
             // Save scan state after each post
             saveScanState({
                 lastProcessedPostId: post.id,
@@ -191,14 +240,19 @@ export async function runAutoComment(scanMode: ScanMode = 'continue'): Promise<A
         }
 
         // Save final scan state
-        saveScanState({
-            lastScanAt: new Date().toISOString(),
-        });
-
-        addLog('success', `Hoàn thành: ${result.commentsPosted} posted, ${result.commentsSkipped} skipped`);
+        if (!abortFlag) {
+            saveScanState({
+                lastScanAt: new Date().toISOString(),
+            });
+            addLog('success', `Hoàn thành: ${result.commentsPosted} posted, ${result.commentsSkipped} skipped`);
+        }
     } catch (error: any) {
         result.errors.push(error.message);
         addLog('error', `Lỗi: ${error.message}`);
+    } finally {
+        // Always reset process state
+        isProcessRunning = false;
+        abortFlag = false;
     }
 
     return result;
