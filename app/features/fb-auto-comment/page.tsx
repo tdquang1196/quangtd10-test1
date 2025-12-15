@@ -241,7 +241,11 @@ export default function FBAutoCommentPage() {
         }, 1000);
 
         try {
-            // Send config and comments to server
+            // Get scan state from localStorage
+            const savedScanState = localStorage.getItem('fb-auto-comment-scan-state');
+            const currentScanState = savedScanState ? JSON.parse(savedScanState) : null;
+
+            // Send config, comments, and scan state to server
             const res = await fetch('/api/fb-auto-comment/scheduler', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -250,6 +254,7 @@ export default function FBAutoCommentPage() {
                     scanMode,
                     config: { accessToken, pageId, delayBetweenComments: delay },
                     comments,
+                    scanState: currentScanState,
                 }),
             });
             const data = await res.json();
@@ -258,6 +263,12 @@ export default function FBAutoCommentPage() {
             if (data.logs && data.logs.length > 0) {
                 setLogs(data.logs);
                 saveToLocalStorage('logs', data.logs);
+            }
+
+            // Save new scan state to localStorage
+            if (data.scanState) {
+                saveToLocalStorage('scan-state', data.scanState);
+                setScanState(data.scanState);
             }
         } catch (error) {
             console.error('Error running:', error);
@@ -274,6 +285,10 @@ export default function FBAutoCommentPage() {
 
         setLoading(true);
         try {
+            // Get scan state from localStorage
+            const savedScanState = localStorage.getItem('fb-auto-comment-scan-state');
+            const currentScanState = savedScanState ? JSON.parse(savedScanState) : null;
+
             const res = await fetch('/api/fb-auto-comment/scheduler', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -282,12 +297,18 @@ export default function FBAutoCommentPage() {
                     scanMode,
                     config: { accessToken, pageId, delayBetweenComments: delay },
                     comments,
+                    scanState: currentScanState,
                 }),
             });
             const data = await res.json();
             if (data.logs) {
                 setLogs(data.logs);
                 saveToLocalStorage('logs', data.logs);
+            }
+            // Save new scan state
+            if (data.scanState) {
+                saveToLocalStorage('scan-state', data.scanState);
+                setScanState(data.scanState);
             }
         } catch (error) {
             console.error('Error in scheduled run:', error);

@@ -64,11 +64,15 @@ export async function POST(request: NextRequest) {
                     delayBetweenComments: config.delayBetweenComments || 5
                 };
 
-                // Run with provided config and comments
-                const result = await runAutoComment(runMode, fbConfig, comments);
+                // Get scan state from client
+                const clientScanState = body.scanState || null;
+
+                // Run with provided config, comments, and scan state
+                const result = await runAutoComment(runMode, fbConfig, comments, clientScanState);
                 return NextResponse.json({
                     success: true,
                     result,
+                    scanState: result.scanState,
                     logs: getLogs()
                 });
 
@@ -79,3 +83,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
+
+// Increase timeout for long-running auto-comment process
+// Vercel Free: max 10s, Pro: max 300s
+export const maxDuration = 300; // 5 minutes

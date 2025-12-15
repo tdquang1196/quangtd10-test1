@@ -131,16 +131,26 @@ function markAsCommented(postId: string, message: string): void {
 }
 
 /**
+ * Scan state structure
+ */
+interface ScanStateData {
+    lastProcessedPostTime: string | null;
+    totalPostsProcessed: number;
+}
+
+/**
  * Run the auto-comment process once
  * @param scanMode - 'full' to scan all posts, 'continue' to scan only new posts
  * @param config - Config from client
  * @param comments - Comments from client
+ * @param clientScanState - Scan state from client (localStorage)
  */
 export async function runAutoComment(
     scanMode: ScanMode = 'continue',
     config: FBConfig,
-    comments: string[]
-): Promise<AutoCommentResult> {
+    comments: string[],
+    clientScanState?: ScanStateData
+): Promise<AutoCommentResult & { scanState: ScanStateData }> {
     // Prevent multiple runs
     if (isProcessRunning) {
         addLog('warning', 'Đang có quá trình khác chạy, vui lòng đợi...');
@@ -149,29 +159,37 @@ export async function runAutoComment(
             commentsPosted: 0,
             commentsSkipped: 0,
             errors: ['Process already running'],
+            scanState: clientScanState || { lastProcessedPostTime: null, totalPostsProcessed: 0 }
         };
     }
 
     isProcessRunning = true;
     abortFlag = false;
 
-    const result: AutoCommentResult = {
+    // Use client scan state or default
+    let currentScanState: ScanStateData = clientScanState || {
+        lastProcessedPostTime: null,
+        totalPostsProcessed: 0
+    };
+
+    const result: AutoCommentResult & { scanState: ScanStateData } = {
         totalPosts: 0,
         commentsPosted: 0,
         commentsSkipped: 0,
         errors: [],
+        scanState: currentScanState
     };
 
     // Reset tracking for full scan
     if (scanMode === 'full') {
         addLog('info', `🔄 CHẾ ĐỘ: Quét toàn bộ từ đầu`);
         commentedPosts.clear();
-        scanState = { lastProcessedPostTime: null, totalPostsProcessed: 0 };
+        currentScanState = { lastProcessedPostTime: null, totalPostsProcessed: 0 };
     } else {
-        if (scanState.lastProcessedPostTime) {
-            addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp từ ${new Date(scanState.lastProcessedPostTime).toLocaleString('vi-VN')}`);
+        if (currentScanState.lastProcessedPostTime) {
+            addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp từ ${new Date(currentScanState.lastProcessedPostTime).toLocaleString('vi-VN')}`);
         } else {
-            addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp (lần đầu)`);
+            addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp (lần đầu - sẽ quét tất cả)`);
         }
     }
 
@@ -184,8 +202,8 @@ export async function runAutoComment(
         addLog('info', `Tìm thấy ${allContent.length} posts/videos tổng cộng`);
 
         // Filter posts in continue mode
-        if (scanMode === 'continue' && scanState.lastProcessedPostTime) {
-            const lastTime = new Date(scanState.lastProcessedPostTime).getTime();
+        if (scanMode === 'continue' && currentScanState.lastProcessedPostTime) {
+            const lastTime = new Date(currentScanState.lastProcessedPostTime).getTime();
             const originalCount = allContent.length;
             allContent = allContent.filter(post => {
                 const postTime = new Date(post.created_time).getTime();
@@ -275,8 +293,9 @@ export async function runAutoComment(
             if (abortFlag) break;
 
             // Update scan state
-            scanState.lastProcessedPostTime = post.created_time;
-            scanState.totalPostsProcessed++;
+            currentScanState.lastProcessedPostTime = post.created_time;
+            currentScanState.totalPostsProcessed++;
+            result.scanState = { ...currentScanState };
         }
 
         if (!abortFlag) {
@@ -288,6 +307,7 @@ export async function runAutoComment(
     } finally {
         isProcessRunning = false;
         abortFlag = false;
+        result.scanState = { ...currentScanState };
     }
 
     return result;
