@@ -280,13 +280,14 @@ export async function runAutoComment(
                     markAsCommented(post.id, commentText);
                     result.commentsPosted++;
                     addLog('success', `✅ Thành công! Post ${postIndex + 1}, Comment ${cmtIndex + 1}`);
-                } else {
-                    addLog('error', `❌ Lỗi post comment vào Post ${postIndex + 1}`);
-                }
 
-                // Delay
-                addLog('info', `⏳ Đợi ${config.delayBetweenComments}s...`);
-                await new Promise(r => setTimeout(r, config.delayBetweenComments * 1000));
+                    // Only delay after successful comment
+                    addLog('info', `⏳ Đợi ${config.delayBetweenComments}s...`);
+                    await new Promise(r => setTimeout(r, config.delayBetweenComments * 1000));
+                } else {
+                    addLog('error', `❌ Lỗi post comment vào Post ${postIndex + 1} - Chạy tiếp ngay`);
+                    // No delay on error - continue immediately
+                }
             }
 
             // Check for abort after post
