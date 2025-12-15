@@ -105,7 +105,8 @@ export async function getAllContent(pageId: string, accessToken: string): Promis
 }
 
 /**
- * Get page's comments on a post
+ * Get page's comments on a post (with full pagination)
+ * Uses filter=toplevel to get only top-level comments (not replies)
  */
 export async function getPageCommentsOnPost(
     postId: string,
@@ -113,28 +114,41 @@ export async function getPageCommentsOnPost(
     accessToken: string
 ): Promise<string[]> {
     const comments: string[] = [];
-    let nextUrl: string | null = `${BASE_URL}/${postId}/comments?fields=id,message,from&limit=100&access_token=${accessToken}`;
+    // filter=toplevel gets only top-level comments (not replies)
+    let nextUrl: string | null = `${BASE_URL}/${postId}/comments?fields=id,message,from&filter=toplevel&limit=200&access_token=${accessToken}`;
+    let pageCount = 0;
+    const maxPages = 20; // Safety limit to prevent infinite loops
 
-    while (nextUrl) {
+    while (nextUrl && pageCount < maxPages) {
         try {
             const response = await fetch(nextUrl);
             const data: PaginatedResponse<any> = await response.json();
 
             if ((data as any).error) {
+                console.error('Error fetching comments:', (data as any).error);
                 break;
             }
 
+            // Filter to only page's comments
             const pageComments = data.data
                 .filter((c: any) => c.from?.id === pageId)
                 .map((c: any) => c.message);
 
             comments.push(...pageComments);
             nextUrl = data.paging?.next || null;
+            pageCount++;
+
+            // Add delay to avoid rate limiting
+            if (nextUrl) {
+                await new Promise(r => setTimeout(r, 500));
+            }
         } catch (error) {
+            console.error('Error in getPageCommentsOnPost:', error);
             break;
         }
     }
 
+    console.log(`[getPageCommentsOnPost] Post ${postId}: Found ${comments.length} comments from page (${pageCount} pages)`);
     return comments;
 }
 

@@ -248,6 +248,8 @@ export async function runAutoComment(
                 config.accessToken
             );
 
+            addLog('info', `📝 Tìm thấy ${existingComments.length} comments đã có từ Page`);
+
             // Sync existing comments to tracking
             existingComments.forEach(c => {
                 if (!isAlreadyCommented(post.id, c)) {
@@ -266,7 +268,11 @@ export async function runAutoComment(
                     break;
                 }
 
-                if (isAlreadyCommented(post.id, commentText)) {
+                // Check duplicate using BOTH in-memory tracking AND direct comparison with existingComments
+                const alreadyExists = isAlreadyCommented(post.id, commentText) ||
+                    existingComments.some(ec => getFirstNWords(ec, 10) === getFirstNWords(commentText, 10));
+
+                if (alreadyExists) {
                     result.commentsSkipped++;
                     addLog('warning', `⏭️ [Comment ${cmtIndex + 1}] Đã có, bỏ qua: "${commentPreview}"`);
                     continue;
