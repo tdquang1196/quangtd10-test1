@@ -203,12 +203,22 @@ export const useMigration = () => {
           for (const sheetName of sheetsToRead) {
             const sheet = workbook.Sheets[sheetName]
 
-            // Read without header, get all rows
-            const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+            // Get sheet range to determine actual row numbers
+            const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1')
 
-            // Skip rows before startRow and map columns
+            // Read with range starting from startRow (1-indexed in Excel, 0-indexed in range)
+            const startRowIdx = excelConfig.startRow - 1 // Convert to 0-indexed
+            const readRange = { ...range, s: { ...range.s, r: startRowIdx } }
+
+            // Read data with the correct range
+            const jsonData = XLSX.utils.sheet_to_json(sheet, {
+              header: 1,
+              defval: '',
+              range: readRange
+            })
+
+            // Map columns (jsonData now starts from startRow)
             const sheetRows = jsonData
-              .slice(excelConfig.startRow - 1) // Convert to 0-based index
               .map((row: any, idx: number) => {
                 if (!Array.isArray(row)) return null
 
@@ -527,6 +537,13 @@ export const useMigration = () => {
       id: string
       file: File | null
       schoolPrefix: string
+      excelConfig: {
+        startRow: number
+        fullNameColumn: string
+        gradeColumn: string
+        phoneNumberColumn: string
+        readAllSheets: boolean
+      }
     }>,
     subscriptionConfig?: {
       enabled: boolean
@@ -549,6 +566,9 @@ export const useMigration = () => {
       const school = schools[i]
       setProgressMessage(`Processing file ${i + 1}/${schools.length}: ${school.schoolPrefix}`)
 
+      // Use each school's own excelConfig
+      const config = school.excelConfig
+
       try {
         const fileData = await new Promise<any>((resolve, reject) => {
           if (!school.file) {
@@ -561,19 +581,62 @@ export const useMigration = () => {
             try {
               const data = new Uint8Array(e.target?.result as ArrayBuffer)
               const workbook = XLSX.read(data, { type: 'array' })
-              const firstSheet = workbook.Sheets[workbook.SheetNames[0]]
-              const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: ['fullName', 'grade', 'phoneNumber'] })
 
-              const excelRows = jsonData
-                .map((row: any) => ({
-                  fullName: row.fullName?.toString().trim() || '',
-                  grade: row.grade?.toString().trim() || '',
-                  phoneNumber: row.phoneNumber?.toString().trim() || ''
-                }))
-                .filter(row => row.fullName && row.grade)
+              // Column indices (same as single school)
+              const fullNameIdx = columnToIndex(config.fullNameColumn.toUpperCase())
+              const gradeIdx = columnToIndex(config.gradeColumn.toUpperCase())
+              const phoneIdx = columnToIndex(config.phoneNumberColumn.toUpperCase())
+
+              let allExcelRows: any[] = []
+
+              // Determine which sheets to read
+              const sheetsToRead = config.readAllSheets
+                ? workbook.SheetNames
+                : [workbook.SheetNames[0]]
+
+              // Read data from selected sheets
+              for (const sheetName of sheetsToRead) {
+                const sheet = workbook.Sheets[sheetName]
+
+                // Get sheet range to determine actual row numbers
+                const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1')
+
+                // Read with range starting from startRow (1-indexed in Excel, 0-indexed in range)
+                const startRowIdx = config.startRow - 1 // Convert to 0-indexed
+                const readRange = { ...range, s: { ...range.s, r: startRowIdx } }
+
+                // Read data with the correct range
+                const jsonData = XLSX.utils.sheet_to_json(sheet, {
+                  header: 1,
+                  defval: '',
+                  range: readRange
+                })
+
+                // Map columns (jsonData now starts from startRow)
+                const sheetRows = jsonData
+                  .map((row: any, idx: number) => {
+                    if (!Array.isArray(row)) return null
+
+                    return {
+                      fullName: (row[fullNameIdx]?.toString().trim() || ''),
+                      grade: (row[gradeIdx]?.toString().trim() || ''),
+                      phoneNumber: (row[phoneIdx]?.toString().trim() || ''),
+                      _sheet: sheetName,
+                      _row: config.startRow + idx
+                    }
+                  })
+                  .filter((row: any) => row && row.fullName && row.grade)
+
+                allExcelRows = [...allExcelRows, ...sheetRows]
+              }
+
+              if (allExcelRows.length === 0) {
+                reject(new Error('No valid data found in Excel file'))
+                return
+              }
 
               const processed = processExcelData(
-                excelRows,
+                allExcelRows,
                 school.schoolPrefix.trim().toLowerCase(),
                 new Set(),
                 new Set()
@@ -1068,6 +1131,200 @@ export const useMigration = () => {
     }
   }
 
+  // Retry failed users for a specific school in batch mode
+  const retryBatchSchoolFailedUsers = async (schoolIndex: number) => {
+    const school = batchResults[schoolIndex]
+    if (!school || !school.failedUsers || school.failedUsers.length === 0) {
+      showNotification('No failed users to retry for this school', 'warning')
+      return
+    }
+
+    setRetryingSchoolIndex(schoolIndex)
+    setProgressMessage(`Retrying ${school.failedUsers.length} failed users for ${school.schoolPrefix}...`)
+
+    try {
+      // Separate students and teachers from failed users
+      const failedStudents = school.failedUsers.filter((u: any) =>
+        school.students.some((s: any) => s.username === u.username)
+      )
+      const failedTeachers = school.failedUsers.filter((u: any) =>
+        school.teachers.some((t: any) => t.username === u.username)
+      )
+
+      const listDataStudent = failedStudents.map((user: any) => ({
+        username: user.username,
+        displayName: user.displayName,
+        password: user.password,
+        classses: user.classses,
+        phoneNumber: user.phoneNumber || ''
+      }))
+
+      const listDataTeacher = failedTeachers.map((user: any) => ({
+        username: user.username,
+        displayName: user.displayName,
+        password: user.password,
+        classses: user.classses,
+        phoneNumber: ''
+      }))
+
+      // Get unique classes from retry users
+      const uniqueClasses = Array.from(new Set([
+        ...failedStudents.map((s: any) => s.classses),
+        ...failedTeachers.map((t: any) => t.classses)
+      ].filter(Boolean)))
+
+      const listDataClasses = uniqueClasses.map(className => ({
+        username: className,
+        displayName: '',
+        password: '',
+        classses: className,
+        phoneNumber: '',
+        grade: undefined
+      }))
+
+      const token = localStorage.getItem('auth_token')
+      const response = await axios.post('/api/migrate', {
+        ListDataStudent: listDataStudent,
+        ListDataTeacher: listDataTeacher,
+        ListDataClasses: listDataClasses
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      const retryResult = response.data
+
+      // Merge retry results with existing school results
+      const updatedStudents = [...school.students]
+      const updatedTeachers = [...school.teachers]
+      const updatedErrors = [...school.failedUsers]
+
+      // Update successful retries for students
+      retryResult.ListDataStudent?.forEach((student: any) => {
+        const existingIndex = updatedStudents.findIndex((s: any) => s.username === student.username)
+        if (existingIndex >= 0) {
+          updatedStudents[existingIndex] = student
+        } else {
+          updatedStudents.push(student)
+        }
+        // Remove from errors if successful
+        const errorIndex = updatedErrors.findIndex((e: any) => e.username === student.username)
+        if (errorIndex >= 0 && student.id) {
+          updatedErrors.splice(errorIndex, 1)
+        }
+      })
+
+      // Update successful retries for teachers
+      retryResult.ListDataTeacher?.forEach((teacher: any) => {
+        const existingIndex = updatedTeachers.findIndex((t: any) => t.username === teacher.username)
+        if (existingIndex >= 0) {
+          updatedTeachers[existingIndex] = teacher
+        } else {
+          updatedTeachers.push(teacher)
+        }
+        // Remove from errors if successful
+        const errorIndex = updatedErrors.findIndex((e: any) => e.username === teacher.username)
+        if (errorIndex >= 0 && teacher.id) {
+          updatedErrors.splice(errorIndex, 1)
+        }
+      })
+
+      // Update batch results
+      const updatedResults = [...batchResults]
+      updatedResults[schoolIndex] = {
+        ...school,
+        students: updatedStudents,
+        teachers: updatedTeachers,
+        failedUsers: updatedErrors
+      }
+      setBatchResults(updatedResults)
+
+      const retriedSuccess = (retryResult.ListDataStudent?.filter((s: any) => s.id)?.length || 0) +
+        (retryResult.ListDataTeacher?.filter((t: any) => t.id)?.length || 0)
+      const stillFailed = updatedErrors.length
+
+      if (stillFailed === 0) {
+        showNotification(`✅ ${school.schoolPrefix}: All ${retriedSuccess} retries succeeded!`, 'success')
+      } else {
+        showNotification(`${school.schoolPrefix}: ${retriedSuccess} succeeded, ${stillFailed} still failed`, 'warning')
+      }
+
+      // Auto-assign packages if enabled
+      if (batchSubscriptionConfig?.enabled && batchSubscriptionConfig.subscriptionId) {
+        const newSuccessfulStudents = retryResult.ListDataStudent?.filter((s: any) => s.id) || []
+        if (newSuccessfulStudents.length > 0) {
+          setProgressMessage(`Assigning packages to ${newSuccessfulStudents.length} newly succeeded students...`)
+
+          const BATCH_SIZE = 5
+          const BATCH_DELAY_MS = 300
+          let packageSuccessCount = 0
+          const packageFailedUsers: any[] = []
+
+          const batches: any[][] = []
+          for (let i = 0; i < newSuccessfulStudents.length; i += BATCH_SIZE) {
+            batches.push(newSuccessfulStudents.slice(i, i + BATCH_SIZE))
+          }
+
+          for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+            const batch = batches[batchIndex]
+            const packageResults = await Promise.allSettled(
+              batch.map((student: any) =>
+                givePackageToUser({
+                  subscriptionId: batchSubscriptionConfig.subscriptionId,
+                  userId: student.id,
+                  description: batchSubscriptionConfig.description || `Retry migration ${new Date().toISOString().split('T')[0]}`,
+                  source: parseInt(batchSubscriptionConfig.source),
+                  requester: batchSubscriptionConfig.requester || 'Migration Tool',
+                })
+              )
+            )
+
+            packageResults.forEach((result, idx) => {
+              if (result.status === 'fulfilled') {
+                packageSuccessCount++
+              } else {
+                packageFailedUsers.push({
+                  userId: batch[idx].id,
+                  username: batch[idx].actualUserName || batch[idx].username,
+                  error: result.reason?.message || 'Unknown error'
+                })
+              }
+            })
+
+            if (batchIndex < batches.length - 1) {
+              await new Promise(r => setTimeout(r, BATCH_DELAY_MS))
+            }
+          }
+
+          // Update package assignment in results
+          const currentPackage = updatedResults[schoolIndex].packageAssignment || { success: 0, failed: 0, failedUsers: [] }
+          updatedResults[schoolIndex] = {
+            ...updatedResults[schoolIndex],
+            packageAssignment: {
+              success: currentPackage.success + packageSuccessCount,
+              failed: currentPackage.failed - packageSuccessCount + packageFailedUsers.length,
+              failedUsers: [...(currentPackage.failedUsers || []).filter((u: any) =>
+                !newSuccessfulStudents.some((s: any) => s.id === u.userId)
+              ), ...packageFailedUsers]
+            }
+          }
+          setBatchResults(updatedResults)
+
+          if (packageSuccessCount > 0) {
+            showNotification(`📦 Assigned ${packageSuccessCount} packages to newly succeeded students`, 'success')
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error(`Retry error for ${school.schoolPrefix}:`, error)
+      showNotification(`Failed to retry for ${school.schoolPrefix}: ${error.message}`, 'error')
+    } finally {
+      setRetryingSchoolIndex(null)
+      setProgressMessage('')
+    }
+  }
+
   return {
     // State
     file,
@@ -1115,6 +1372,7 @@ export const useMigration = () => {
     handleProcessBatch,
     handleCreateBatch,
     retryBatchSchoolPackages,
+    retryBatchSchoolFailedUsers,
     retryFailedUsers,
     retryRoleAssignment,
     // Subscription actions

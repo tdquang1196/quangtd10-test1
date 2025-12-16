@@ -5,10 +5,20 @@ import { Button, Input, Card } from '@/components/ui'
 import { getSubscriptions } from '@/lib/api/users'
 import { PACKAGE_SOURCE_OPTIONS } from '@/constants/package-source'
 
+interface ExcelConfig {
+    startRow: number
+    fullNameColumn: string
+    gradeColumn: string
+    phoneNumberColumn: string
+    readAllSheets: boolean
+}
+
 interface SchoolForm {
     id: string
     file: File | null
     schoolPrefix: string
+    excelConfig: ExcelConfig
+    showConfig: boolean
 }
 
 interface BatchSubscriptionConfig {
@@ -24,9 +34,17 @@ interface BatchUploadTabProps {
     isProcessing: boolean
 }
 
+const defaultExcelConfig: ExcelConfig = {
+    startRow: 2,
+    fullNameColumn: 'A',
+    gradeColumn: 'B',
+    phoneNumberColumn: 'C',
+    readAllSheets: false
+}
+
 export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTabProps) {
     const [schools, setSchools] = useState<SchoolForm[]>([
-        { id: crypto.randomUUID(), file: null, schoolPrefix: '' }
+        { id: crypto.randomUUID(), file: null, schoolPrefix: '', excelConfig: { ...defaultExcelConfig }, showConfig: false }
     ])
 
     // Subscription configuration
@@ -70,7 +88,9 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
         setSchools([...schools, {
             id: crypto.randomUUID(),
             file: null,
-            schoolPrefix: ''
+            schoolPrefix: '',
+            excelConfig: { ...defaultExcelConfig },
+            showConfig: false
         }])
     }
 
@@ -82,6 +102,17 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
 
     const updateSchool = (id: string, updates: Partial<SchoolForm>) => {
         setSchools(schools.map(s => s.id === id ? { ...s, ...updates } : s))
+    }
+
+    const updateSchoolConfig = (id: string, configUpdates: Partial<ExcelConfig>) => {
+        setSchools(schools.map(s => s.id === id ? {
+            ...s,
+            excelConfig: { ...s.excelConfig, ...configUpdates }
+        } : s))
+    }
+
+    const toggleShowConfig = (id: string) => {
+        setSchools(schools.map(s => s.id === id ? { ...s, showConfig: !s.showConfig } : s))
     }
 
     const handleFileChange = (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
@@ -97,7 +128,7 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
             <div className="flex items-center justify-between">
                 <div>
                     <h3 className="text-lg font-semibold text-gray-900">School Forms</h3>
-                    <p className="text-sm text-gray-600 mt-1">Add multiple schools to process in queue</p>
+                    <p className="text-sm text-gray-600 mt-1">Add multiple schools to process in queue (each with own column mapping)</p>
                 </div>
                 <Button onClick={addSchool} variant="secondary" size="sm">
                     <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -121,17 +152,29 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                     <p className="text-sm text-gray-500">{school.schoolPrefix || 'No prefix set'}</p>
                                 </div>
                             </div>
-                            {schools.length > 1 && (
+                            <div className="flex items-center gap-2">
                                 <button
-                                    onClick={() => removeSchool(school.id)}
-                                    className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors"
-                                    title="Remove school"
+                                    onClick={() => toggleShowConfig(school.id)}
+                                    className={`text-sm px-3 py-1.5 rounded-lg transition-colors ${school.showConfig
+                                            ? 'bg-purple-100 text-purple-700'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        }`}
+                                    title="Configure Excel columns"
                                 >
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
+                                    ⚙️ Columns
                                 </button>
-                            )}
+                                {schools.length > 1 && (
+                                    <button
+                                        onClick={() => removeSchool(school.id)}
+                                        className="text-red-500 hover:text-red-700 hover:bg-red-50 p-2 rounded-lg transition-colors"
+                                        title="Remove school"
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                )}
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -178,7 +221,94 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                 />
                                 <p className="text-xs text-gray-500 mt-1">Used for username generation</p>
                             </div>
+
+                            {/* Config Summary */}
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Column Mapping
+                                </label>
+                                <div className="flex flex-wrap gap-2 text-xs">
+                                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                                        Row: {school.excelConfig.startRow}
+                                    </span>
+                                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                                        Name: {school.excelConfig.fullNameColumn}
+                                    </span>
+                                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                                        Grade: {school.excelConfig.gradeColumn}
+                                    </span>
+                                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                                        Phone: {school.excelConfig.phoneNumberColumn}
+                                    </span>
+                                    {school.excelConfig.readAllSheets && (
+                                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                                            All Sheets
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
                         </div>
+
+                        {/* Excel Config Panel (Collapsible) */}
+                        {school.showConfig && (
+                            <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-200">
+                                <h5 className="text-sm font-semibold text-purple-900 mb-3">Excel Column Configuration</h5>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Start Row</label>
+                                        <Input
+                                            type="number"
+                                            min={1}
+                                            value={school.excelConfig.startRow}
+                                            onChange={(e) => updateSchoolConfig(school.id, { startRow: parseInt(e.target.value) || 1 })}
+                                            placeholder="2"
+                                            className="text-sm"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Name Col</label>
+                                        <Input
+                                            value={school.excelConfig.fullNameColumn}
+                                            onChange={(e) => updateSchoolConfig(school.id, { fullNameColumn: e.target.value.toUpperCase() })}
+                                            placeholder="A"
+                                            className="uppercase text-sm"
+                                            maxLength={2}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Grade Col</label>
+                                        <Input
+                                            value={school.excelConfig.gradeColumn}
+                                            onChange={(e) => updateSchoolConfig(school.id, { gradeColumn: e.target.value.toUpperCase() })}
+                                            placeholder="B"
+                                            className="uppercase text-sm"
+                                            maxLength={2}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Phone Col</label>
+                                        <Input
+                                            value={school.excelConfig.phoneNumberColumn}
+                                            onChange={(e) => updateSchoolConfig(school.id, { phoneNumberColumn: e.target.value.toUpperCase() })}
+                                            placeholder="C"
+                                            className="uppercase text-sm"
+                                            maxLength={2}
+                                        />
+                                    </div>
+                                    <div className="flex items-end">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={school.excelConfig.readAllSheets}
+                                                onChange={(e) => updateSchoolConfig(school.id, { readAllSheets: e.target.checked })}
+                                                className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                                            />
+                                            <span className="text-xs text-gray-700">All Sheets</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </Card>
                 ))}
             </div>

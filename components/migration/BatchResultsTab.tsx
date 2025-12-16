@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Button, Card } from '@/components/ui'
+import { PackageAssignmentSection } from './PackageAssignmentSection'
 
 interface SchoolResult {
     schoolPrefix: string
@@ -21,10 +22,11 @@ interface BatchResultsTabProps {
     results: SchoolResult[]
     onClose: () => void
     retryBatchSchoolPackages?: (schoolIndex: number) => Promise<void>
+    retryBatchSchoolFailedUsers?: (schoolIndex: number) => Promise<void>
     retryingSchoolIndex?: number | null
 }
 
-export default function BatchResultsTab({ results, onClose, retryBatchSchoolPackages, retryingSchoolIndex }: BatchResultsTabProps) {
+export default function BatchResultsTab({ results, onClose, retryBatchSchoolPackages, retryBatchSchoolFailedUsers, retryingSchoolIndex }: BatchResultsTabProps) {
     const [expandedSchools, setExpandedSchools] = useState<Set<string>>(new Set(results.map(r => r.schoolPrefix)))
 
     const toggleSchool = (prefix: string) => {
@@ -89,20 +91,33 @@ export default function BatchResultsTab({ results, onClose, retryBatchSchoolPack
                 </div>
             </Card>
 
-            {/* Common Send Package Form */}
-            <Card className="p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200">
-                <h4 className="text-lg font-semibold text-gray-900 mb-4">📦 Send Welcome Package (All Students)</h4>
-                <div className="flex gap-3">
-                    <input
-                        type="text"
-                        placeholder="Package URL (e.g., https://app.example.com/welcome)"
-                        className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            {/* Package Assignment for All Schools */}
+            {getAllStudents().filter(s => s.id).length > 0 && (
+                <>
+                    <div className="border-t-2 border-gray-200 my-4" />
+                    <div className="text-center mb-4">
+                        <h3 className="text-lg font-semibold text-gray-900">📦 Package Assignment (All Schools)</h3>
+                        <p className="text-sm text-gray-600">Assign subscription packages to all students from all schools</p>
+                    </div>
+                    <PackageAssignmentSection
+                        users={getAllStudents()
+                            .filter(s => s.id)
+                            .map(s => ({
+                                userId: s.id,
+                                username: s.actualUserName || s.username,
+                                displayName: s.displayName
+                            }))}
+                        onSuccess={(success, failed) => {
+                            if (failed === 0) {
+                                alert(`✅ Successfully assigned packages to all ${success} students!`)
+                            } else {
+                                alert(`⚠️ Assigned: ${success}, Failed: ${failed}`)
+                            }
+                        }}
+                        onError={(error) => alert(`❌ Error: ${error}`)}
                     />
-                    <Button size="lg">
-                        Send to {getAllStudents().length} Students
-                    </Button>
-                </div>
-            </Card>
+                </>
+            )}
 
             {/* Results by School */}
             <div className="space-y-4">
@@ -199,6 +214,16 @@ export default function BatchResultsTab({ results, onClose, retryBatchSchoolPack
                                             variant="secondary"
                                             size="sm"
                                             onClick={() => copyToClipboard(
+                                                result.teachers.map(t => t.classses).join('\n'),
+                                                'Teacher Classes'
+                                            )}
+                                        >
+                                            🏫 Teacher Classes
+                                        </Button>
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => copyToClipboard(
                                                 JSON.stringify(result, null, 2),
                                                 'Full Result JSON'
                                             )}
@@ -275,6 +300,30 @@ export default function BatchResultsTab({ results, onClose, retryBatchSchoolPack
                                         </div>
                                     </div>
 
+                                    {/* Per-School Package Assignment (if not already assigned via auto) */}
+                                    {result.students.filter(s => s.id).length > 0 && !result.packageAssignment && (
+                                        <div className="border-t border-gray-200 pt-4">
+                                            <h5 className="font-semibold text-gray-900 mb-3">📦 Assign Packages ({result.students.filter(s => s.id).length} students)</h5>
+                                            <PackageAssignmentSection
+                                                users={result.students
+                                                    .filter(s => s.id)
+                                                    .map(s => ({
+                                                        userId: s.id,
+                                                        username: s.actualUserName || s.username,
+                                                        displayName: s.displayName
+                                                    }))}
+                                                onSuccess={(success, failed) => {
+                                                    if (failed === 0) {
+                                                        alert(`✅ ${result.schoolPrefix}: Assigned packages to all ${success} students!`)
+                                                    } else {
+                                                        alert(`⚠️ ${result.schoolPrefix}: ${success} succeeded, ${failed} failed`)
+                                                    }
+                                                }}
+                                                onError={(error) => alert(`❌ ${result.schoolPrefix}: ${error}`)}
+                                            />
+                                        </div>
+                                    )}
+
                                     {/* Package Assignment Status */}
                                     {result.packageAssignment && (
                                         <div className={`p-4 rounded-lg border-2 ${result.packageAssignment.failed === 0 ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
@@ -343,7 +392,23 @@ export default function BatchResultsTab({ results, onClose, retryBatchSchoolPack
                                     {/* Errors */}
                                     {totalErrors > 0 && (
                                         <div>
-                                            <h5 className="font-semibold text-red-900 mb-3">❌ Errors ({totalErrors})</h5>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <h5 className="font-semibold text-red-900">❌ Errors ({totalErrors})</h5>
+                                                {result.failedUsers.length > 0 && retryBatchSchoolFailedUsers && (
+                                                    <Button
+                                                        onClick={() => retryBatchSchoolFailedUsers(index)}
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        disabled={retryingSchoolIndex === index}
+                                                        loading={retryingSchoolIndex === index}
+                                                    >
+                                                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                        </svg>
+                                                        Retry Failed Users ({result.failedUsers.length})
+                                                    </Button>
+                                                )}
+                                            </div>
                                             <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-h-48 overflow-auto">
                                                 {result.failedUsers.map((user, i) => (
                                                     <div key={`user-${i}`} className="text-sm text-red-700 mb-2">
