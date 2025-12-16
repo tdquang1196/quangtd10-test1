@@ -17,7 +17,9 @@ interface UploadTabProps {
     fullNameColumn: string
     gradeColumn: string
     phoneNumberColumn: string
+    usernameColumn: string
     readAllSheets: boolean
+    excludeLastSheet: boolean
   }
   setSchoolPrefix: (prefix: string) => void
   setEnableAutoSubscription: (enable: boolean) => void
@@ -30,9 +32,12 @@ interface UploadTabProps {
     fullNameColumn: string
     gradeColumn: string
     phoneNumberColumn: string
+    usernameColumn: string
     readAllSheets: boolean
+    excludeLastSheet: boolean
   }) => void
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onClearFile?: () => void
 }
 
 export default function UploadTab({
@@ -52,7 +57,8 @@ export default function UploadTab({
   setSubscriptionRequester,
   setSubscriptionSource,
   setExcelConfig,
-  handleFileChange
+  handleFileChange,
+  onClearFile
 }: UploadTabProps) {
   const [subscriptions, setSubscriptions] = useState<Array<{ id: string; title: string }>>([])
   const [isLoadingSubscriptions, setIsLoadingSubscriptions] = useState(false)
@@ -169,10 +175,24 @@ export default function UploadTab({
                     <div className="text-xs text-gray-600">Process data from all sheets in the file</div>
                   </label>
                 </div>
+
+                <div className="flex items-center gap-3 p-3 border border-orange-200 rounded-lg bg-orange-50">
+                  <input
+                    type="checkbox"
+                    id="exclude-last-sheet"
+                    checked={excelConfig.excludeLastSheet}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, excludeLastSheet: e.target.checked })}
+                    className="w-5 h-5 text-orange-600 border-gray-300 rounded focus:ring-orange-500 cursor-pointer"
+                  />
+                  <label htmlFor="exclude-last-sheet" className="flex-1 cursor-pointer">
+                    <div className="text-sm font-semibold text-orange-900">Exclude Last Sheet</div>
+                    <div className="text-xs text-orange-700">Skip the last sheet (often teacher info)</div>
+                  </label>
+                </div>
               </div>
 
               {/* Column Mapping */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-1">
                     Full Name Column <span className="text-red-600">*</span>
@@ -217,6 +237,21 @@ export default function UploadTab({
                   />
                   <p className="text-xs text-gray-500 mt-1">Column letter (optional)</p>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    Username Column
+                  </label>
+                  <input
+                    type="text"
+                    value={excelConfig.usernameColumn}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, usernameColumn: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none uppercase"
+                    placeholder=""
+                    maxLength={3}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Skip if has value (optional)</p>
+                </div>
               </div>
 
               {/* Preview Example */}
@@ -224,6 +259,7 @@ export default function UploadTab({
                 <div className="text-xs font-semibold text-gray-700 mb-2">Preview:</div>
                 <div className="text-xs text-gray-600 font-mono">
                   Row {excelConfig.startRow}: {excelConfig.fullNameColumn}="Nguyen Van A", {excelConfig.gradeColumn}="10A", {excelConfig.phoneNumberColumn}="0123456789"
+                  {excelConfig.usernameColumn && <span className="text-orange-600"> | {excelConfig.usernameColumn}=username → SKIP</span>}
                 </div>
               </div>
             </div>
@@ -338,24 +374,55 @@ export default function UploadTab({
                 className="hidden"
                 id="file-upload"
               />
-              <label
-                htmlFor="file-upload"
-                className="flex items-center justify-center w-full px-6 py-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50/50 transition-all cursor-pointer group"
-              >
-                <div className="text-center">
-                  <div className="w-16 h-16 bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors">
-                    <svg className="w-8 h-8 text-gray-400 group-hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              {file ? (
+                <div className="flex items-center gap-3 w-full px-6 py-4 border-2 border-green-300 bg-green-50 rounded-xl">
+                  <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
-                  <p className="text-sm font-semibold text-gray-700 mb-1">
-                    {file ? file.name : 'Click to upload Excel file'}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    Supports .xlsx and .xls files
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-green-800 truncate">{file.name}</p>
+                    <p className="text-xs text-green-600">{(file.size / 1024).toFixed(1)} KB</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <label
+                      htmlFor="file-upload"
+                      className="px-3 py-2 text-xs font-medium text-blue-700 bg-blue-100 rounded-lg hover:bg-blue-200 cursor-pointer transition-colors"
+                    >
+                      Change
+                    </label>
+                    {onClearFile && (
+                      <button
+                        type="button"
+                        onClick={onClearFile}
+                        className="px-3 py-2 text-xs font-medium text-red-700 bg-red-100 rounded-lg hover:bg-red-200 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </label>
+              ) : (
+                <label
+                  htmlFor="file-upload"
+                  className="flex items-center justify-center w-full px-6 py-8 border-2 border-dashed border-gray-300 rounded-xl hover:border-blue-500 hover:bg-blue-50/50 transition-all cursor-pointer group"
+                >
+                  <div className="text-center">
+                    <div className="w-16 h-16 bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4 transition-colors">
+                      <svg className="w-8 h-8 text-gray-400 group-hover:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-700 mb-1">
+                      Click to upload Excel file
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Supports .xlsx and .xls files
+                    </p>
+                  </div>
+                </label>
+              )}
             </div>
           </div>
         </CardContent>

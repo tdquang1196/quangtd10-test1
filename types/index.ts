@@ -7,6 +7,7 @@ export interface StudentData {
   grade: string
   className: string
   phoneNumber: string
+  warning?: string // Warning message for special characters, etc.
 }
 
 export interface TeacherData {
@@ -14,6 +15,7 @@ export interface TeacherData {
   displayName: string
   password: string
   className: string
+  warning?: string // Warning message for validation issues
 }
 
 // Excel row type

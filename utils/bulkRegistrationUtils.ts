@@ -18,6 +18,122 @@ export function removeVietnameseSigns(text: string): string {
 }
 
 /**
+ * Validate fullName for special characters
+ * Returns warning message if special characters found, null otherwise
+ * Allows: Unicode letters (including Vietnamese), numbers, spaces
+ */
+export function validateFullName(fullName: string): string | null {
+  if (!fullName) return null;
+
+  // Match only letters (including Unicode), numbers, and spaces
+  // \p{L} matches any Unicode letter
+  // \p{N} matches any Unicode number
+  const validPattern = /^[\p{L}\p{N}\s]+$/u;
+
+  if (!validPattern.test(fullName)) {
+    // Find the special characters
+    const specialChars = fullName.replace(/[\p{L}\p{N}\s]/gu, '');
+    const uniqueChars = [...new Set(specialChars)].join(', ');
+    return `Special chars: ${uniqueChars}`;
+  }
+
+  return null;
+}
+
+/**
+ * Validate grade for invalid characters
+ * Returns warning message if invalid characters found, null otherwise
+ * Allows: Only ASCII letters (a-zA-Z) and numbers (0-9)
+ * NOT allowed: Unicode characters, spaces, special characters
+ */
+export function validateGrade(grade: string): string | null {
+  if (!grade) return null;
+
+  // Only allow a-zA-Z and 0-9
+  const validPattern = /^[a-zA-Z0-9]+$/;
+
+  if (!validPattern.test(grade)) {
+    // Find the invalid characters
+    const invalidChars = grade.replace(/[a-zA-Z0-9]/g, '');
+    const uniqueChars = [...new Set(invalidChars)].join(', ');
+    if (uniqueChars) {
+      return `Invalid grade: ${uniqueChars}`;
+    }
+    return 'Grade has invalid characters';
+  }
+
+  return null;
+}
+
+/**
+ * Validate username for invalid characters
+ * Returns warning message if invalid characters found, null otherwise
+ * Allows: Only ASCII letters (a-zA-Z) and numbers (0-9)
+ */
+export function validateUsername(username: string): string | null {
+  if (!username) return null;
+
+  const validPattern = /^[a-zA-Z0-9]+$/;
+
+  if (!validPattern.test(username)) {
+    const invalidChars = username.replace(/[a-zA-Z0-9]/g, '');
+    const uniqueChars = [...new Set(invalidChars)].join(', ');
+    if (uniqueChars) {
+      return `Invalid username chars: ${uniqueChars}`;
+    }
+    return 'Username has invalid characters';
+  }
+
+  return null;
+}
+
+/**
+ * Validate className for invalid characters
+ * Returns warning message if invalid characters found, null otherwise
+ * Allows: Only ASCII letters (a-zA-Z), numbers (0-9), and underscore (_)
+ */
+export function validateClassName(className: string): string | null {
+  if (!className) return null;
+
+  const validPattern = /^[a-zA-Z0-9_]+$/;
+
+  if (!validPattern.test(className)) {
+    const invalidChars = className.replace(/[a-zA-Z0-9_]/g, '');
+    const uniqueChars = [...new Set(invalidChars)].join(', ');
+    if (uniqueChars) {
+      return `Invalid class chars: ${uniqueChars}`;
+    }
+    return 'Class name has invalid characters';
+  }
+
+  return null;
+}
+
+/**
+ * Validate displayName for special characters
+ * Returns warning message if special characters found, null otherwise
+ * Allows: Unicode letters (including Vietnamese), numbers, spaces
+ * NOT allowed: Special characters like @#$%^&*()
+ */
+export function validateDisplayName(displayName: string): string | null {
+  if (!displayName) return null;
+
+  // Match only letters (including Unicode), numbers, and spaces
+  const validPattern = /^[\p{L}\p{N}\s]+$/u;
+
+  if (!validPattern.test(displayName)) {
+    const specialChars = displayName.replace(/[\p{L}\p{N}\s]/gu, '');
+    const uniqueChars = [...new Set(specialChars)].join(', ');
+    if (uniqueChars) {
+      return `Invalid display chars: ${uniqueChars}`;
+    }
+    return 'Display name has special characters';
+  }
+
+  return null;
+}
+
+/**
  * Generate username from full name following the algorithm:
  * schoolPrefix + lastName + firstLettersOfOtherNames
  * Length: 6-20 characters
@@ -162,6 +278,7 @@ export interface StudentData {
   displayName: string;
   password: string;
   className: string;
+  warning?: string; // Warning message for special characters, etc.
 }
 
 /**
@@ -173,6 +290,7 @@ export interface TeacherData {
   password: string;
   grade: string;
   className: string;
+  warning?: string; // Warning message for validation issues
 }
 
 /**
@@ -235,6 +353,23 @@ export function processExcelData(
       // Generate class name
       const className = generateClassName(schoolPrefix, trimmedGrade);
 
+      // Validate all fields
+      const fullNameWarning = validateFullName(fullName);
+      const gradeWarning = validateGrade(trimmedGrade);
+      const usernameWarning = validateUsername(username);
+      const classNameWarning = validateClassName(className);
+      const displayNameWarning = validateDisplayName(displayName);
+
+      // Combine warnings
+      const warnings = [
+        fullNameWarning,
+        gradeWarning,
+        usernameWarning,
+        classNameWarning,
+        displayNameWarning
+      ].filter(Boolean);
+      const combinedWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
+
       // Create student data
       students.push({
         fullName,
@@ -243,7 +378,8 @@ export function processExcelData(
         username,
         displayName,
         password: generatePassword(),
-        className
+        className,
+        warning: combinedWarning
       });
 
       // Create teacher account for this grade if not exists
@@ -256,12 +392,23 @@ export function processExcelData(
 
         localUsernames.add(teacherUsername.toLowerCase());
 
+        // Validate teacher fields
+        const teacherUsernameWarning = validateUsername(teacherUsername);
+        const teacherDisplayNameWarning = validateDisplayName(teacherUsername);
+        const teacherClassNameWarning = validateClassName(className);
+        const teacherWarnings = [
+          teacherUsernameWarning,
+          teacherDisplayNameWarning,
+          teacherClassNameWarning
+        ].filter(Boolean);
+
         teachers.set(trimmedGrade, {
           ...teacherAccount,
           username: teacherUsername,
           displayName: teacherUsername,
           grade: trimmedGrade,
-          className
+          className,
+          warning: teacherWarnings.length > 0 ? teacherWarnings.join('; ') : undefined
         });
       }
     } catch (error) {
@@ -283,12 +430,23 @@ export function processExcelData(
 
   localUsernames.add(generalTeacherUsername.toLowerCase());
 
+  // Validate admin teacher fields
+  const adminUsernameWarning = validateUsername(generalTeacherUsername);
+  const adminDisplayNameWarning = validateDisplayName(generalTeacherUsername);
+  const adminClassNameWarning = validateClassName(schoolPrefix.toUpperCase());
+  const adminWarnings = [
+    adminUsernameWarning,
+    adminDisplayNameWarning,
+    adminClassNameWarning
+  ].filter(Boolean);
+
   teachers.set(generalTeacherKey, {
     ...generalTeacherAccount,
     username: generalTeacherUsername,
     displayName: generalTeacherUsername,
     grade: '', // No specific grade for general teacher
-    className: schoolPrefix.toUpperCase() // Class name is the school prefix itself (uppercase)
+    className: schoolPrefix.toUpperCase(), // Class name is the school prefix itself (uppercase)
+    warning: adminWarnings.length > 0 ? adminWarnings.join('; ') : undefined
   });
 
   return {

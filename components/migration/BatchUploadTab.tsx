@@ -10,7 +10,9 @@ interface ExcelConfig {
     fullNameColumn: string
     gradeColumn: string
     phoneNumberColumn: string
+    usernameColumn: string
     readAllSheets: boolean
+    excludeLastSheet: boolean
 }
 
 interface SchoolForm {
@@ -32,6 +34,11 @@ interface BatchSubscriptionConfig {
 interface BatchUploadTabProps {
     onSubmit: (schools: SchoolForm[], subscriptionConfig: BatchSubscriptionConfig) => void
     isProcessing: boolean
+    // Persisted state from parent
+    schools: SchoolForm[]
+    setSchools: (schools: SchoolForm[]) => void
+    subscriptionConfig: BatchSubscriptionConfig
+    setSubscriptionConfig: (config: BatchSubscriptionConfig) => void
 }
 
 const defaultExcelConfig: ExcelConfig = {
@@ -39,22 +46,19 @@ const defaultExcelConfig: ExcelConfig = {
     fullNameColumn: 'A',
     gradeColumn: 'B',
     phoneNumberColumn: 'C',
-    readAllSheets: false
+    usernameColumn: '',
+    readAllSheets: false,
+    excludeLastSheet: false
 }
 
-export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTabProps) {
-    const [schools, setSchools] = useState<SchoolForm[]>([
-        { id: crypto.randomUUID(), file: null, schoolPrefix: '', excelConfig: { ...defaultExcelConfig }, showConfig: false }
-    ])
-
-    // Subscription configuration
-    const [subscriptionConfig, setSubscriptionConfig] = useState<BatchSubscriptionConfig>({
-        enabled: false,
-        subscriptionId: '',
-        description: '',
-        requester: '',
-        source: '4' // Default: TRIAL_GIVE
-    })
+export default function BatchUploadTab({
+    onSubmit,
+    isProcessing,
+    schools,
+    setSchools,
+    subscriptionConfig,
+    setSubscriptionConfig
+}: BatchUploadTabProps) {
 
     // Subscriptions
     const [subscriptions, setSubscriptions] = useState<Array<{ id: string; title: string }>>([])
@@ -156,8 +160,8 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                 <button
                                     onClick={() => toggleShowConfig(school.id)}
                                     className={`text-sm px-3 py-1.5 rounded-lg transition-colors ${school.showConfig
-                                            ? 'bg-purple-100 text-purple-700'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                        ? 'bg-purple-100 text-purple-700'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                         }`}
                                     title="Configure Excel columns"
                                 >
@@ -191,20 +195,44 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                         className="hidden"
                                         id={`file-${school.id}`}
                                     />
-                                    <label
-                                        htmlFor={`file-${school.id}`}
-                                        className={`flex items-center justify-center gap-3 px-4 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-all ${school.file
-                                            ? 'border-green-400 bg-green-50 text-green-700'
-                                            : 'border-gray-300 hover:border-blue-400 bg-gray-50 hover:bg-blue-50 text-gray-600'
-                                            }`}
-                                    >
-                                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                        </svg>
-                                        <span className="font-medium">
-                                            {school.file ? school.file.name : 'Click to upload Excel file'}
-                                        </span>
-                                    </label>
+                                    {school.file ? (
+                                        <div className="flex items-center gap-3 px-4 py-3 border-2 border-green-300 bg-green-50 rounded-xl">
+                                            <svg className="w-6 h-6 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <div className="flex-1 min-w-0">
+                                                <span className="font-medium text-green-800 text-sm truncate block">{school.file.name}</span>
+                                                <span className="text-xs text-green-600">{(school.file.size / 1024).toFixed(1)} KB</span>
+                                            </div>
+                                            <div className="flex gap-1 flex-shrink-0">
+                                                <label
+                                                    htmlFor={`file-${school.id}`}
+                                                    className="px-2 py-1 text-xs font-medium text-blue-700 bg-blue-100 rounded hover:bg-blue-200 cursor-pointer transition-colors"
+                                                >
+                                                    Change
+                                                </label>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => updateSchool(school.id, { file: null })}
+                                                    className="px-2 py-1 text-xs font-medium text-red-700 bg-red-100 rounded hover:bg-red-200 transition-colors"
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <label
+                                            htmlFor={`file-${school.id}`}
+                                            className="flex items-center justify-center gap-3 px-4 py-3 border-2 border-dashed rounded-xl cursor-pointer transition-all border-gray-300 hover:border-blue-400 bg-gray-50 hover:bg-blue-50 text-gray-600"
+                                        >
+                                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                            </svg>
+                                            <span className="font-medium">
+                                                Click to upload Excel file
+                                            </span>
+                                        </label>
+                                    )}
                                 </div>
                             </div>
 
@@ -240,9 +268,19 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                     <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
                                         Phone: {school.excelConfig.phoneNumberColumn}
                                     </span>
+                                    {school.excelConfig.usernameColumn && (
+                                        <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded">
+                                            Username: {school.excelConfig.usernameColumn} (skip)
+                                        </span>
+                                    )}
                                     {school.excelConfig.readAllSheets && (
                                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">
                                             All Sheets
+                                        </span>
+                                    )}
+                                    {school.excelConfig.excludeLastSheet && (
+                                        <span className="px-2 py-1 bg-red-100 text-red-700 rounded">
+                                            Exclude Last
                                         </span>
                                     )}
                                 </div>
@@ -253,7 +291,7 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                         {school.showConfig && (
                             <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-200">
                                 <h5 className="text-sm font-semibold text-purple-900 mb-3">Excel Column Configuration</h5>
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
                                     <div>
                                         <label className="block text-xs font-medium text-gray-600 mb-1">Start Row</label>
                                         <Input
@@ -295,6 +333,17 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                             maxLength={2}
                                         />
                                     </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Username Col</label>
+                                        <Input
+                                            value={school.excelConfig.usernameColumn}
+                                            onChange={(e) => updateSchoolConfig(school.id, { usernameColumn: e.target.value.toUpperCase() })}
+                                            placeholder=""
+                                            className="uppercase text-sm"
+                                            maxLength={2}
+                                        />
+                                        <p className="text-xs text-orange-600 mt-0.5">Skip if filled</p>
+                                    </div>
                                     <div className="flex items-end">
                                         <label className="flex items-center gap-2 cursor-pointer">
                                             <input
@@ -304,6 +353,17 @@ export default function BatchUploadTab({ onSubmit, isProcessing }: BatchUploadTa
                                                 className="w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
                                             />
                                             <span className="text-xs text-gray-700">All Sheets</span>
+                                        </label>
+                                    </div>
+                                    <div className="flex items-end">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={school.excelConfig.excludeLastSheet}
+                                                onChange={(e) => updateSchoolConfig(school.id, { excludeLastSheet: e.target.checked })}
+                                                className="w-4 h-4 text-red-600 border-gray-300 rounded focus:ring-red-500"
+                                            />
+                                            <span className="text-xs text-red-700">Exclude Last</span>
                                         </label>
                                     </div>
                                 </div>

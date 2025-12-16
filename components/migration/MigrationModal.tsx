@@ -138,6 +138,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                   setSubscriptionSource={migration.setSubscriptionSource}
                   setExcelConfig={migration.setExcelConfig}
                   handleFileChange={migration.handleFileChange}
+                  onClearFile={migration.clearFile}
                 />
               )}
               {migration.activeTab === 'preview' && <PreviewTab {...migration} />}
@@ -163,6 +164,10 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                 <BatchUploadTab
                   onSubmit={migration.handleProcessBatch}
                   isProcessing={migration.isProcessing}
+                  schools={migration.batchSchoolsForm}
+                  setSchools={migration.setBatchSchoolsForm}
+                  subscriptionConfig={migration.batchFormSubscriptionConfig}
+                  setSubscriptionConfig={migration.setBatchFormSubscriptionConfig}
                 />
               )}
               {migration.activeTab === 'batch-preview' && (

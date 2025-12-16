@@ -357,9 +357,9 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
           <CardTitle className="flex items-center gap-2">
             <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-              </svg>
-              Classes Overview
-            </CardTitle>
+            </svg>
+            Classes Overview
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
@@ -420,6 +420,11 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                   ({teachers.length - teachersToAdd.length} skipped for existing classes)
                 </span>
               )}
+              {teachersToAdd.filter(t => t.warning).length > 0 && (
+                <Badge variant="warning" className="ml-2">
+                  {teachersToAdd.filter(t => t.warning).length} warnings
+                </Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -430,6 +435,7 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                     <TableHead>Username</TableHead>
                     <TableHead>Password</TableHead>
                     <TableHead>Class</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -437,8 +443,13 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                   {teachersToAdd.map((teacher, idx) => {
                     const isAdminTeacher = teacher.className && !teacher.className.includes('_')
                     return (
-                      <TableRow key={idx}>
-                        <TableCell className="font-mono font-semibold">{teacher.username}</TableCell>
+                      <TableRow key={idx} className={teacher.warning ? 'bg-red-50' : ''}>
+                        <TableCell className="font-mono font-semibold">
+                          {teacher.username}
+                          {teacher.warning && (
+                            <span className="text-red-500 ml-1" title={teacher.warning}>⚠️</span>
+                          )}
+                        </TableCell>
                         <TableCell className="font-mono text-purple-600">{teacher.password}</TableCell>
                         <TableCell>
                           <Badge variant="default">{teacher.className}</Badge>
@@ -448,6 +459,15 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                             <Badge variant="info">Admin Teacher</Badge>
                           ) : (
                             <Badge variant="success">New Class</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {teacher.warning ? (
+                            <Badge variant="error" className="text-xs">
+                              {teacher.warning}
+                            </Badge>
+                          ) : (
+                            <Badge variant="success" className="text-xs">OK</Badge>
                           )}
                         </TableCell>
                       </TableRow>
@@ -469,9 +489,44 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
               Students (First 50 of {students.length})
+              {students.filter(s => s.warning).length > 0 && (
+                <Badge variant="warning" className="ml-2">
+                  {students.filter(s => s.warning).length} warnings
+                </Badge>
+              )}
             </CardTitle>
           </CardHeader>
           <CardContent>
+            {/* Warning Banner */}
+            {students.filter(s => s.warning).length > 0 && (
+              <div className="mb-4 p-4 bg-red-50 border-2 border-red-200 rounded-lg">
+                <div className="flex gap-3">
+                  <div className="flex-shrink-0">
+                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-red-900 mb-2">
+                      ⚠️ {students.filter(s => s.warning).length} Students Have Special Characters
+                    </h3>
+                    <p className="text-sm text-red-800 mb-2">
+                      Please fix these names in your Excel file before uploading:
+                    </p>
+                    <ul className="text-sm text-red-700 space-y-1 max-h-32 overflow-auto">
+                      {students.filter(s => s.warning).slice(0, 10).map((s, i) => (
+                        <li key={i}>
+                          • <strong>{s.fullName}</strong>: {s.warning}
+                        </li>
+                      ))}
+                      {students.filter(s => s.warning).length > 10 && (
+                        <li className="text-red-500">...and {students.filter(s => s.warning).length - 10} more</li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="max-h-96 overflow-auto">
               <Table>
                 <TableHeader sticky>
@@ -482,29 +537,85 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                     <TableHead>Grade</TableHead>
                     <TableHead>Class</TableHead>
                     <TableHead>Phone</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {students.slice(0, 50).map((student, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell className="font-semibold">{student.fullName}</TableCell>
-                      <TableCell className="font-mono text-sm">{student.username}</TableCell>
-                      <TableCell className="font-mono text-blue-600">{student.password}</TableCell>
-                      <TableCell>
-                        <Badge variant="default">{student.grade}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{student.className}</TableCell>
-                      <TableCell className="text-sm text-gray-600">{student.phoneNumber}</TableCell>
-                    </TableRow>
-                  ))}
+                  {(() => {
+                    // Calculate how many to show: all warnings + fill up to 50 total
+                    const studentsWithWarnings = students.filter(s => s.warning);
+                    const studentsWithoutWarnings = students.filter(s => !s.warning);
+                    const remainingSlots = Math.max(0, 50 - studentsWithWarnings.length);
+                    const normalStudentsToShow = studentsWithoutWarnings.slice(0, remainingSlots);
+
+                    return (
+                      <>
+                        {/* Show ALL students with warnings first */}
+                        {studentsWithWarnings.map((student, idx) => (
+                          <TableRow key={`warn-${idx}`} className="bg-red-50">
+                            <TableCell className="font-semibold">
+                              {student.fullName}
+                              <span className="text-red-500 ml-1" title={student.warning}>⚠️</span>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">{student.username}</TableCell>
+                            <TableCell className="font-mono text-blue-600">{student.password}</TableCell>
+                            <TableCell>
+                              <Badge variant="default">{student.grade}</Badge>
+                            </TableCell>
+                            <TableCell className="text-sm">{student.className}</TableCell>
+                            <TableCell className="text-sm text-gray-600">{student.phoneNumber}</TableCell>
+                            <TableCell>
+                              <Badge variant="error" className="text-xs">
+                                {student.warning}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {/* Then fill up to 50 total with students WITHOUT warnings */}
+                        {normalStudentsToShow.map((student, idx) => (
+                          <TableRow key={`ok-${idx}`}>
+                            <TableCell className="font-semibold">{student.fullName}</TableCell>
+                            <TableCell className="font-mono text-sm">{student.username}</TableCell>
+                            <TableCell className="font-mono text-blue-600">{student.password}</TableCell>
+                            <TableCell>
+                              <Badge variant="default">{student.grade}</Badge>
+                            </TableCell>
+                            <TableCell className="text-sm">{student.className}</TableCell>
+                            <TableCell className="text-sm text-gray-600">{student.phoneNumber}</TableCell>
+                            <TableCell>
+                              <Badge variant="success" className="text-xs">OK</Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </TableBody>
               </Table>
             </div>
-            {students.length > 50 && (
-              <p className="text-sm text-gray-500 mt-3 text-center">
-                Showing first 50 of {students.length} students
+            <div className="text-sm text-gray-500 mt-3 text-center space-y-1">
+              {students.filter(s => s.warning).length > 0 && (
+                <p className="text-red-600 font-medium">
+                  ⚠️ Showing all {students.filter(s => s.warning).length} students with warnings
+                </p>
+              )}
+              {(() => {
+                const warningCount = students.filter(s => s.warning).length;
+                const normalCount = students.filter(s => !s.warning).length;
+                const shownNormal = Math.min(normalCount, Math.max(0, 50 - warningCount));
+                if (normalCount > shownNormal) {
+                  return (
+                    <p>
+                      + {shownNormal} of {normalCount} students without warnings (total shown: {warningCount + shownNormal})
+                    </p>
+                  );
+                }
+                return null;
+              })()}
+              <p className="text-xs text-blue-600 italic">
+                ℹ️ Processing order remains unchanged (original file order)
               </p>
-            )}
+            </div>
           </CardContent>
         </Card>
       )}

@@ -29,7 +29,9 @@ export const useMigration = () => {
     fullNameColumn: 'A',
     gradeColumn: 'B',
     phoneNumberColumn: 'C',
-    readAllSheets: false
+    usernameColumn: '', // Optional: if user already has username, skip them
+    readAllSheets: false,
+    excludeLastSheet: false // Optional: exclude last sheet (often teacher info)
   })
 
   // Subscription assignment state
@@ -61,6 +63,51 @@ export const useMigration = () => {
   } | null>(null)
   const [retryingSchoolIndex, setRetryingSchoolIndex] = useState<number | null>(null)
 
+  // Batch upload form state (persisted when navigating between tabs)
+  const [batchSchoolsForm, setBatchSchoolsForm] = useState<Array<{
+    id: string
+    file: File | null
+    schoolPrefix: string
+    excelConfig: {
+      startRow: number
+      fullNameColumn: string
+      gradeColumn: string
+      phoneNumberColumn: string
+      usernameColumn: string
+      readAllSheets: boolean
+      excludeLastSheet: boolean
+    }
+    showConfig: boolean
+  }>>([{
+    id: crypto.randomUUID(),
+    file: null,
+    schoolPrefix: '',
+    excelConfig: {
+      startRow: 2,
+      fullNameColumn: 'A',
+      gradeColumn: 'B',
+      phoneNumberColumn: 'C',
+      usernameColumn: '',
+      readAllSheets: false,
+      excludeLastSheet: false
+    },
+    showConfig: false
+  }])
+
+  const [batchFormSubscriptionConfig, setBatchFormSubscriptionConfig] = useState<{
+    enabled: boolean
+    subscriptionId: string
+    description: string
+    requester: string
+    source: string
+  }>({
+    enabled: false,
+    subscriptionId: '',
+    description: '',
+    requester: '',
+    source: '4'
+  })
+
   const showNotification = (message: string, type: 'success' | 'error' | 'warning' | 'info') => {
     setNotification({ message, type })
   }
@@ -90,7 +137,9 @@ export const useMigration = () => {
       fullNameColumn: 'A',
       gradeColumn: 'B',
       phoneNumberColumn: 'C',
-      readAllSheets: false
+      usernameColumn: '',
+      readAllSheets: false,
+      excludeLastSheet: false
     })
   }
 
@@ -101,6 +150,13 @@ export const useMigration = () => {
       setTeachers([])
       setErrors([])
     }
+  }
+
+  const clearFile = () => {
+    setFile(null)
+    setStudents([])
+    setTeachers([])
+    setErrors([])
   }
 
   const checkExistingClasses = async (studentList: StudentData[], prefix: string) => {
@@ -191,13 +247,22 @@ export const useMigration = () => {
           const fullNameIdx = columnToIndex(excelConfig.fullNameColumn.toUpperCase())
           const gradeIdx = columnToIndex(excelConfig.gradeColumn.toUpperCase())
           const phoneIdx = columnToIndex(excelConfig.phoneNumberColumn.toUpperCase())
+          const usernameIdx = excelConfig.usernameColumn
+            ? columnToIndex(excelConfig.usernameColumn.toUpperCase())
+            : -1
 
           let allExcelRows: any[] = []
+          let skippedCount = 0
 
           // Determine which sheets to read
-          const sheetsToRead = excelConfig.readAllSheets
-            ? workbook.SheetNames
+          let sheetsToRead = excelConfig.readAllSheets
+            ? [...workbook.SheetNames]
             : [workbook.SheetNames[0]]
+
+          // Exclude last sheet if option is enabled (often contains teacher info)
+          if (excelConfig.excludeLastSheet && sheetsToRead.length > 1) {
+            sheetsToRead = sheetsToRead.slice(0, -1)
+          }
 
           // Read data from selected sheets
           for (const sheetName of sheetsToRead) {
@@ -222,6 +287,15 @@ export const useMigration = () => {
               .map((row: any, idx: number) => {
                 if (!Array.isArray(row)) return null
 
+                // Check if username column is specified and has value - skip if already registered
+                if (usernameIdx >= 0) {
+                  const existingUsername = row[usernameIdx]?.toString().trim()
+                  if (existingUsername) {
+                    skippedCount++
+                    return null // Skip this row
+                  }
+                }
+
                 return {
                   fullName: (row[fullNameIdx]?.toString().trim() || ''),
                   grade: (row[gradeIdx]?.toString().trim() || ''),
@@ -233,6 +307,11 @@ export const useMigration = () => {
               .filter((row: any) => row && row.fullName && row.grade)
 
             allExcelRows = [...allExcelRows, ...sheetRows]
+          }
+
+          // Show skipped count if any
+          if (skippedCount > 0) {
+            console.log(`Skipped ${skippedCount} rows (already have username)`)
           }
 
           if (allExcelRows.length === 0) {
@@ -542,7 +621,9 @@ export const useMigration = () => {
         fullNameColumn: string
         gradeColumn: string
         phoneNumberColumn: string
+        usernameColumn: string
         readAllSheets: boolean
+        excludeLastSheet: boolean
       }
     }>,
     subscriptionConfig?: {
@@ -586,13 +667,22 @@ export const useMigration = () => {
               const fullNameIdx = columnToIndex(config.fullNameColumn.toUpperCase())
               const gradeIdx = columnToIndex(config.gradeColumn.toUpperCase())
               const phoneIdx = columnToIndex(config.phoneNumberColumn.toUpperCase())
+              const usernameIdx = config.usernameColumn
+                ? columnToIndex(config.usernameColumn.toUpperCase())
+                : -1
 
               let allExcelRows: any[] = []
+              let skippedCount = 0
 
               // Determine which sheets to read
-              const sheetsToRead = config.readAllSheets
-                ? workbook.SheetNames
+              let sheetsToRead = config.readAllSheets
+                ? [...workbook.SheetNames]
                 : [workbook.SheetNames[0]]
+
+              // Exclude last sheet if option is enabled (often contains teacher info)
+              if (config.excludeLastSheet && sheetsToRead.length > 1) {
+                sheetsToRead = sheetsToRead.slice(0, -1)
+              }
 
               // Read data from selected sheets
               for (const sheetName of sheetsToRead) {
@@ -617,6 +707,15 @@ export const useMigration = () => {
                   .map((row: any, idx: number) => {
                     if (!Array.isArray(row)) return null
 
+                    // Check if username column is specified and has value - skip if already registered
+                    if (usernameIdx >= 0) {
+                      const existingUsername = row[usernameIdx]?.toString().trim()
+                      if (existingUsername) {
+                        skippedCount++
+                        return null // Skip this row
+                      }
+                    }
+
                     return {
                       fullName: (row[fullNameIdx]?.toString().trim() || ''),
                       grade: (row[gradeIdx]?.toString().trim() || ''),
@@ -628,6 +727,11 @@ export const useMigration = () => {
                   .filter((row: any) => row && row.fullName && row.grade)
 
                 allExcelRows = [...allExcelRows, ...sheetRows]
+              }
+
+              // Log skipped count if any
+              if (skippedCount > 0) {
+                console.log(`[${school.schoolPrefix}] Skipped ${skippedCount} rows (already have username)`)
               }
 
               if (allExcelRows.length === 0) {
@@ -1350,6 +1454,11 @@ export const useMigration = () => {
     totalSchools,
     batchPreviewData,
     retryingSchoolIndex,
+    // Batch form state (persisted)
+    batchSchoolsForm,
+    setBatchSchoolsForm,
+    batchFormSubscriptionConfig,
+    setBatchFormSubscriptionConfig,
     // Subscription state
     enableAutoSubscription,
     subscriptionId,
@@ -1369,6 +1478,7 @@ export const useMigration = () => {
     handleProcessFile,
     handleCreateUsers,
     setExcelConfig,
+    clearFile,
     handleProcessBatch,
     handleCreateBatch,
     retryBatchSchoolPackages,
