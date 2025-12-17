@@ -961,7 +961,7 @@ export const useMigration = () => {
     showNotification(finalMessage, 'success')
   }
 
-  // Retry failed user migrations (not package assignments)
+  // Retry failed user migrations (resume from failed step)
   const retryFailedUsers = async () => {
     if (!result?.ListUserError || result.ListUserError.length === 0) {
       showNotification('No failed users to retry', 'warning')
@@ -969,53 +969,30 @@ export const useMigration = () => {
     }
 
     setIsCreating(true)
-    setProgressMessage(`Retrying ${result.ListUserError.length} failed users...`)
+    setProgressMessage(`Retrying ${result.ListUserError.length} failed users (resume from failed step)...`)
 
     try {
-      // Separate students and teachers from failed users
-      const failedStudents = result.ListUserError.filter((u: any) =>
-        result.ListDataStudent.some((s: any) => s.username === u.username)
-      )
-      const failedTeachers = result.ListUserError.filter((u: any) =>
-        result.ListDataTeacher.some((t: any) => t.username === u.username)
-      )
-
-      const listDataStudent = failedStudents.map((user: any) => ({
+      // Send full user data including state to the retry endpoint
+      // This allows the backend to resume from the exact step that failed
+      const failedUsersWithState = result.ListUserError.map((user: any) => ({
+        id: user.id,
         username: user.username,
+        actualUserName: user.actualUserName,
         displayName: user.displayName,
+        actualDisplayName: user.actualDisplayName,
         password: user.password,
         classses: user.classses,
-        phoneNumber: user.phoneNumber || ''
-      }))
-
-      const listDataTeacher = failedTeachers.map((user: any) => ({
-        username: user.username,
-        displayName: user.displayName,
-        password: user.password,
-        classses: user.classses,
-        phoneNumber: ''
-      }))
-
-      // Get unique classes from retry users
-      const uniqueClasses = Array.from(new Set([
-        ...failedStudents.map((s: any) => s.classses),
-        ...failedTeachers.map((t: any) => t.classses)
-      ].filter(Boolean)))
-
-      const listDataClasses = uniqueClasses.map(className => ({
-        username: className,
-        displayName: '',
-        password: '',
-        classses: className,
-        phoneNumber: '',
-        grade: undefined
+        phoneNumber: user.phoneNumber || '',
+        grade: user.grade,
+        accessToken: user.accessToken,
+        loginDisplayName: user.loginDisplayName,
+        state: user.state || {}, // Include state for resume logic
+        retryCount: user.retryCount || 0
       }))
 
       const token = localStorage.getItem('auth_token')
-      const response = await axios.post('/api/migrate', {
-        ListDataStudent: listDataStudent,
-        ListDataTeacher: listDataTeacher,
-        ListDataClasses: listDataClasses
+      const response = await axios.post('/api/migrate/retry', {
+        failedUsers: failedUsersWithState
       }, {
         headers: {
           Authorization: `Bearer ${token}`
@@ -1029,40 +1006,52 @@ export const useMigration = () => {
       const updatedTeachers = [...result.ListDataTeacher]
       const updatedErrors = [...result.ListUserError]
 
-      // Update successful retries
-      retryResult.ListDataStudent?.forEach((student: any) => {
-        const existingIndex = updatedStudents.findIndex((s: any) => s.username === student.username)
-        if (existingIndex >= 0) {
-          updatedStudents[existingIndex] = student
-        } else {
-          updatedStudents.push(student)
+      // Update successful retries - REPLACE existing entries, don't add duplicates
+      retryResult.successfulUsers?.forEach((user: any) => {
+        // Check if this is a student
+        const studentIndex = updatedStudents.findIndex((s: any) =>
+          s.username === user.username || s.actualUserName === user.actualUserName
+        )
+        if (studentIndex >= 0) {
+          // Replace with the updated user data
+          updatedStudents[studentIndex] = {
+            ...updatedStudents[studentIndex],
+            ...user
+          }
         }
+
+        // Check if this is a teacher
+        const teacherIndex = updatedTeachers.findIndex((t: any) =>
+          t.username === user.username || t.actualUserName === user.actualUserName
+        )
+        if (teacherIndex >= 0) {
+          // Replace with the updated user data
+          updatedTeachers[teacherIndex] = {
+            ...updatedTeachers[teacherIndex],
+            ...user
+          }
+        }
+
         // Remove from errors if successful
-        const errorIndex = updatedErrors.findIndex((e: any) => e.username === student.username)
+        const errorIndex = updatedErrors.findIndex((e: any) =>
+          e.username === user.username || e.actualUserName === user.actualUserName
+        )
         if (errorIndex >= 0) {
           updatedErrors.splice(errorIndex, 1)
         }
       })
 
-      retryResult.ListDataTeacher?.forEach((teacher: any) => {
-        const existingIndex = updatedTeachers.findIndex((t: any) => t.username === teacher.username)
-        if (existingIndex >= 0) {
-          updatedTeachers[existingIndex] = teacher
-        } else {
-          updatedTeachers.push(teacher)
-        }
-        // Remove from errors if successful
-        const errorIndex = updatedErrors.findIndex((e: any) => e.username === teacher.username)
+      // Update still failed users with new state/reason
+      retryResult.stillFailedUsers?.forEach((user: any) => {
+        const errorIndex = updatedErrors.findIndex((e: any) =>
+          e.username === user.username || e.actualUserName === user.actualUserName
+        )
         if (errorIndex >= 0) {
-          updatedErrors.splice(errorIndex, 1)
-        }
-      })
-
-      // Add new errors from retry
-      retryResult.ListUserError?.forEach((error: any) => {
-        const existingErrorIndex = updatedErrors.findIndex((e: any) => e.username === error.username)
-        if (existingErrorIndex >= 0) {
-          updatedErrors[existingErrorIndex] = error
+          // Update existing error with new state and reason
+          updatedErrors[errorIndex] = {
+            ...updatedErrors[errorIndex],
+            ...user
+          }
         }
       })
 
@@ -1076,10 +1065,10 @@ export const useMigration = () => {
       }
       setResult(updatedResult)
 
-      // Update created/failed users
+      // Update created/failed users for UI
       const allCreated = [
-        ...updatedStudents.filter((s: any) => !updatedErrors.find((e: any) => e.username === s.username)),
-        ...updatedTeachers.filter((t: any) => !updatedErrors.find((e: any) => e.username === t.username))
+        ...updatedStudents.filter((s: any) => s.id && !updatedErrors.find((e: any) => e.username === s.username)),
+        ...updatedTeachers.filter((t: any) => t.id && !updatedErrors.find((e: any) => e.username === t.username))
       ]
       setCreatedUsers(allCreated)
 
@@ -1089,8 +1078,8 @@ export const useMigration = () => {
       }))
       setFailedUsers(allFailed)
 
-      const retriedSuccess = (retryResult.ListDataStudent?.length || 0) + (retryResult.ListDataTeacher?.length || 0)
-      const stillFailed = retryResult.ListUserError?.length || 0
+      const retriedSuccess = retryResult.successfulUsers?.length || 0
+      const stillFailed = retryResult.stillFailedUsers?.length || 0
 
       if (stillFailed === 0) {
         showNotification(`All ${retriedSuccess} failed users successfully retried!`, 'success')
@@ -1099,8 +1088,12 @@ export const useMigration = () => {
       }
 
       // Auto-assign packages to newly successful students if enabled
-      if (enableAutoSubscription && retryResult.ListDataStudent?.length > 0) {
-        const successfulStudents = retryResult.ListDataStudent.filter((s: any) => s.id)
+      if (enableAutoSubscription && retryResult.successfulUsers?.length > 0) {
+        const successfulStudents = retryResult.successfulUsers.filter((u: any) =>
+          u.id && result.ListDataStudent.some((s: any) =>
+            s.username === u.username || s.actualUserName === u.actualUserName
+          )
+        )
         if (successfulStudents.length > 0) {
           await assignPackagesToStudents(successfulStudents)
         }
@@ -1235,7 +1228,7 @@ export const useMigration = () => {
     }
   }
 
-  // Retry failed users for a specific school in batch mode
+  // Retry failed users for a specific school in batch mode (resume from failed step)
   const retryBatchSchoolFailedUsers = async (schoolIndex: number) => {
     const school = batchResults[schoolIndex]
     if (!school || !school.failedUsers || school.failedUsers.length === 0) {
@@ -1244,53 +1237,29 @@ export const useMigration = () => {
     }
 
     setRetryingSchoolIndex(schoolIndex)
-    setProgressMessage(`Retrying ${school.failedUsers.length} failed users for ${school.schoolPrefix}...`)
+    setProgressMessage(`Retrying ${school.failedUsers.length} failed users for ${school.schoolPrefix} (resume from failed step)...`)
 
     try {
-      // Separate students and teachers from failed users
-      const failedStudents = school.failedUsers.filter((u: any) =>
-        school.students.some((s: any) => s.username === u.username)
-      )
-      const failedTeachers = school.failedUsers.filter((u: any) =>
-        school.teachers.some((t: any) => t.username === u.username)
-      )
-
-      const listDataStudent = failedStudents.map((user: any) => ({
+      // Send full user data including state to the retry endpoint
+      const failedUsersWithState = school.failedUsers.map((user: any) => ({
+        id: user.id,
         username: user.username,
+        actualUserName: user.actualUserName,
         displayName: user.displayName,
+        actualDisplayName: user.actualDisplayName,
         password: user.password,
         classses: user.classses,
-        phoneNumber: user.phoneNumber || ''
-      }))
-
-      const listDataTeacher = failedTeachers.map((user: any) => ({
-        username: user.username,
-        displayName: user.displayName,
-        password: user.password,
-        classses: user.classses,
-        phoneNumber: ''
-      }))
-
-      // Get unique classes from retry users
-      const uniqueClasses = Array.from(new Set([
-        ...failedStudents.map((s: any) => s.classses),
-        ...failedTeachers.map((t: any) => t.classses)
-      ].filter(Boolean)))
-
-      const listDataClasses = uniqueClasses.map(className => ({
-        username: className,
-        displayName: '',
-        password: '',
-        classses: className,
-        phoneNumber: '',
-        grade: undefined
+        phoneNumber: user.phoneNumber || '',
+        grade: user.grade,
+        accessToken: user.accessToken,
+        loginDisplayName: user.loginDisplayName,
+        state: user.state || {},
+        retryCount: user.retryCount || 0
       }))
 
       const token = localStorage.getItem('auth_token')
-      const response = await axios.post('/api/migrate', {
-        ListDataStudent: listDataStudent,
-        ListDataTeacher: listDataTeacher,
-        ListDataClasses: listDataClasses
+      const response = await axios.post('/api/migrate/retry', {
+        failedUsers: failedUsersWithState
       }, {
         headers: {
           Authorization: `Bearer ${token}`
@@ -1304,33 +1273,49 @@ export const useMigration = () => {
       const updatedTeachers = [...school.teachers]
       const updatedErrors = [...school.failedUsers]
 
-      // Update successful retries for students
-      retryResult.ListDataStudent?.forEach((student: any) => {
-        const existingIndex = updatedStudents.findIndex((s: any) => s.username === student.username)
-        if (existingIndex >= 0) {
-          updatedStudents[existingIndex] = student
-        } else {
-          updatedStudents.push(student)
+      // Update successful retries - REPLACE existing entries
+      retryResult.successfulUsers?.forEach((user: any) => {
+        // Check if this is a student
+        const studentIndex = updatedStudents.findIndex((s: any) =>
+          s.username === user.username || s.actualUserName === user.actualUserName
+        )
+        if (studentIndex >= 0) {
+          updatedStudents[studentIndex] = {
+            ...updatedStudents[studentIndex],
+            ...user
+          }
         }
+
+        // Check if this is a teacher
+        const teacherIndex = updatedTeachers.findIndex((t: any) =>
+          t.username === user.username || t.actualUserName === user.actualUserName
+        )
+        if (teacherIndex >= 0) {
+          updatedTeachers[teacherIndex] = {
+            ...updatedTeachers[teacherIndex],
+            ...user
+          }
+        }
+
         // Remove from errors if successful
-        const errorIndex = updatedErrors.findIndex((e: any) => e.username === student.username)
-        if (errorIndex >= 0 && student.id) {
+        const errorIndex = updatedErrors.findIndex((e: any) =>
+          e.username === user.username || e.actualUserName === user.actualUserName
+        )
+        if (errorIndex >= 0) {
           updatedErrors.splice(errorIndex, 1)
         }
       })
 
-      // Update successful retries for teachers
-      retryResult.ListDataTeacher?.forEach((teacher: any) => {
-        const existingIndex = updatedTeachers.findIndex((t: any) => t.username === teacher.username)
-        if (existingIndex >= 0) {
-          updatedTeachers[existingIndex] = teacher
-        } else {
-          updatedTeachers.push(teacher)
-        }
-        // Remove from errors if successful
-        const errorIndex = updatedErrors.findIndex((e: any) => e.username === teacher.username)
-        if (errorIndex >= 0 && teacher.id) {
-          updatedErrors.splice(errorIndex, 1)
+      // Update still failed users with new state/reason
+      retryResult.stillFailedUsers?.forEach((user: any) => {
+        const errorIndex = updatedErrors.findIndex((e: any) =>
+          e.username === user.username || e.actualUserName === user.actualUserName
+        )
+        if (errorIndex >= 0) {
+          updatedErrors[errorIndex] = {
+            ...updatedErrors[errorIndex],
+            ...user
+          }
         }
       })
 
@@ -1344,9 +1329,8 @@ export const useMigration = () => {
       }
       setBatchResults(updatedResults)
 
-      const retriedSuccess = (retryResult.ListDataStudent?.filter((s: any) => s.id)?.length || 0) +
-        (retryResult.ListDataTeacher?.filter((t: any) => t.id)?.length || 0)
-      const stillFailed = updatedErrors.length
+      const retriedSuccess = retryResult.successfulUsers?.length || 0
+      const stillFailed = retryResult.stillFailedUsers?.length || 0
 
       if (stillFailed === 0) {
         showNotification(`✅ ${school.schoolPrefix}: All ${retriedSuccess} retries succeeded!`, 'success')
@@ -1356,7 +1340,12 @@ export const useMigration = () => {
 
       // Auto-assign packages if enabled
       if (batchSubscriptionConfig?.enabled && batchSubscriptionConfig.subscriptionId) {
-        const newSuccessfulStudents = retryResult.ListDataStudent?.filter((s: any) => s.id) || []
+        const newSuccessfulStudents = retryResult.successfulUsers?.filter((u: any) =>
+          u.id && school.students.some((s: any) =>
+            s.username === u.username || s.actualUserName === u.actualUserName
+          )
+        ) || []
+
         if (newSuccessfulStudents.length > 0) {
           setProgressMessage(`Assigning packages to ${newSuccessfulStudents.length} newly succeeded students...`)
 

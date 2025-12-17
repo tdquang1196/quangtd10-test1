@@ -37,6 +37,10 @@ export interface FBPost {
     id: string;
     message?: string;
     created_time: string;
+    privacy?: {
+        value: string; // EVERYONE, ALL_FRIENDS, SELF, CUSTOM, etc.
+        description?: string;
+    };
 }
 
 export interface AutoCommentResult {

@@ -33,6 +33,27 @@ interface LogEntry {
     message: string;
 }
 
+// Failed posts tracking
+interface FailedPost {
+    postId: string;
+    postPreview: string;
+    error: string;
+    timestamp: string;
+    resolved: boolean;
+}
+
+let failedPostsStore: FailedPost[] = [];
+
+// Private posts tracking (Only Me posts - skip commenting)
+interface PrivatePost {
+    postId: string;
+    postPreview: string;
+    privacy: string;
+    timestamp: string;
+}
+
+let privatePostsStore: PrivatePost[] = [];
+
 // In-memory tracking (posts already commented in this session)
 let commentedPosts: Map<string, string[]> = new Map();
 
@@ -68,6 +89,90 @@ export function getLogs(): LogEntry[] {
  */
 export function clearLogs(): void {
     logsStore = [];
+}
+
+/**
+ * Get failed posts
+ */
+export function getFailedPosts(): FailedPost[] {
+    return [...failedPostsStore];
+}
+
+/**
+ * Add a failed post
+ */
+function addFailedPost(postId: string, postPreview: string, error: string): void {
+    // Check if already exists (don't add duplicates)
+    const exists = failedPostsStore.some(fp => fp.postId === postId && !fp.resolved);
+    if (!exists) {
+        failedPostsStore.push({
+            postId,
+            postPreview,
+            error,
+            timestamp: new Date().toISOString(),
+            resolved: false
+        });
+    }
+}
+
+/**
+ * Mark a failed post as resolved
+ */
+export function resolveFailedPost(postId: string): void {
+    const post = failedPostsStore.find(fp => fp.postId === postId);
+    if (post) {
+        post.resolved = true;
+    }
+}
+
+/**
+ * Clear all failed posts
+ */
+export function clearFailedPosts(): void {
+    failedPostsStore = [];
+}
+
+/**
+ * Get private posts (Only Me posts)
+ */
+export function getPrivatePosts(): PrivatePost[] {
+    return [...privatePostsStore];
+}
+
+/**
+ * Add a private post to skip list
+ */
+function addPrivatePost(postId: string, postPreview: string, privacy: string): void {
+    const exists = privatePostsStore.some(pp => pp.postId === postId);
+    if (!exists) {
+        privatePostsStore.push({
+            postId,
+            postPreview,
+            privacy,
+            timestamp: new Date().toISOString()
+        });
+    }
+}
+
+/**
+ * Remove a private post from skip list (when successfully commented)
+ */
+export function removePrivatePost(postId: string): void {
+    privatePostsStore = privatePostsStore.filter(pp => pp.postId !== postId);
+}
+
+/**
+ * Check if post is in private posts list
+ */
+function isPrivatePost(postId: string): boolean {
+    return privatePostsStore.some(pp => pp.postId === postId);
+}
+
+/**
+ * Clear all private posts
+ */
+export function clearPrivatePosts(): void {
+    privatePostsStore = [];
 }
 
 /**
@@ -241,6 +346,20 @@ export async function runAutoComment(
 
             addLog('info', `📄 [Post ${postIndex + 1}/${allContent.length}] ${postPreview}`);
 
+            // Check if post is already in private posts list (skip to avoid API spam)
+            if (isPrivatePost(post.id)) {
+                addLog('warning', `🔒 [SKIP] Post đang ở chế độ riêng tư - đã được đánh dấu trước đó`);
+                continue;
+            }
+
+            // Check if post privacy is "Only Me" (SELF)
+            const privacyValue = post.privacy?.value || 'UNKNOWN';
+            if (privacyValue === 'SELF') {
+                addLog('warning', `🔒 [SKIP] Post để chế độ "Only Me" - không thể comment`);
+                addPrivatePost(post.id, postPreview, privacyValue);
+                continue;
+            }
+
             // Get existing comments from page (to sync tracking)
             const existingComments = await getPageCommentsOnPost(
                 post.id,
@@ -280,18 +399,32 @@ export async function runAutoComment(
 
                 // Post comment
                 addLog('info', `💬 [Comment ${cmtIndex + 1}/${comments.length}] Đang post: "${commentPreview}"`);
-                const commentId = await postComment(post.id, commentText, config.accessToken);
+                const commentResult = await postComment(post.id, commentText, config.accessToken);
 
-                if (commentId) {
+                if (commentResult.id) {
                     markAsCommented(post.id, commentText);
                     result.commentsPosted++;
                     addLog('success', `✅ Thành công! Post ${postIndex + 1}, Comment ${cmtIndex + 1}`);
+
+                    // Remove from private posts if it was there (privacy might have changed)
+                    removePrivatePost(post.id);
 
                     // Only delay after successful comment
                     addLog('info', `⏳ Đợi ${config.delayBetweenComments}s...`);
                     await new Promise(r => setTimeout(r, config.delayBetweenComments * 1000));
                 } else {
-                    addLog('error', `❌ Lỗi post comment vào Post ${postIndex + 1} - Chạy tiếp ngay`);
+                    const errorMsg = commentResult.error || 'Unknown error';
+                    addLog('error', `❌ Lỗi post comment vào Post ${postIndex + 1}: ${errorMsg}`);
+
+                    // Track failed post
+                    addFailedPost(post.id, postPreview, errorMsg);
+
+                    // If permission error, mark as private post to skip in future runs
+                    if (errorMsg.includes('200') && errorMsg.toLowerCase().includes('permission')) {
+                        addPrivatePost(post.id, postPreview, 'PERMISSION_ERROR');
+                        addLog('info', `🔒 Đánh dấu post để skip trong các lần chạy sau`);
+                    }
+
                     // No delay on error - continue immediately
                 }
             }

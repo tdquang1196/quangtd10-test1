@@ -1230,4 +1230,179 @@ export class MigrationService {
       roleAssignmentError: roleAssignmentError
     }
   }
+
+  /**
+   * Retry failed users by resuming from the step they failed at.
+   * This method checks the user's state and continues from where it left off:
+   * - If not registered: run full registration + login + init
+   * - If registered but not logged in: run login + init
+   * - If logged in but not initialized: run just init
+   */
+  public async retryUsers(
+    failedUsers: UserData[]
+  ): Promise<{
+    successfulUsers: UserData[]
+    stillFailedUsers: UserData[]
+  }> {
+    const startTime = Date.now()
+    const getTimestamp = () => {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false })
+      return `[${now}] [+${elapsed}s]`
+    }
+
+    console.log(`\n${getTimestamp()} ========== RETRY: Resume from failed step ==========`)
+    console.log(`${getTimestamp()} Retrying ${failedUsers.length} failed users`)
+
+    // Login admin if needed
+    await this.loginAdmin()
+
+    const successfulUsers: UserData[] = []
+    const stillFailedUsers: UserData[] = []
+
+    // Create dispatchers for rate limiting
+    const registerDispatcher = new ThrottledDispatcher('Register', REGISTER_RATE)
+    const loginDispatcher = new ThrottledDispatcher('Login', LOGIN_RATE)
+
+    for (let i = 0; i < failedUsers.length; i++) {
+      const user = { ...failedUsers[i] } // Clone to avoid mutating original
+      console.log(`${getTimestamp()} [${i + 1}/${failedUsers.length}] Processing: ${user.username}`)
+
+      try {
+        // STEP 1: Registration (skip if already registered)
+        if (!user.state?.registered || !user.actualUserName) {
+          console.log(`${getTimestamp()} [${i + 1}] Phase 1: Registering user...`)
+
+          // Check existing usernames
+          const existingUsernames = await this.getExistingUsernames(user.username)
+          let tempIdx = 0
+          let finalUsername = user.username
+          while (existingUsernames.has(finalUsername.toLowerCase())) {
+            tempIdx++
+            finalUsername = `${user.username}${tempIdx}`
+          }
+          user.username = finalUsername
+
+          const registerResult = await retryWithBackoff(
+            () => registerDispatcher.dispatch(() =>
+              this.registerUser(user.username, user.password)
+            ),
+            { context: `Register ${user.username}`, maxRetries: 3 }
+          )
+
+          if (!registerResult.success) {
+            user.reason = registerResult.error || 'Registration failed'
+            stillFailedUsers.push(user)
+            console.log(`${getTimestamp()} [${i + 1}] ❌ Registration failed: ${user.reason}`)
+            continue
+          }
+
+          user.actualUserName = registerResult.actualUsername!
+          user.state = { ...user.state, registered: true }
+          console.log(`${getTimestamp()} [${i + 1}] ✓ Registered as: ${user.actualUserName}`)
+        } else {
+          console.log(`${getTimestamp()} [${i + 1}] Phase 1: Skip (already registered as ${user.actualUserName})`)
+        }
+
+        // STEP 2: Login (skip if already logged in with valid token)
+        if (!user.state?.loggedIn || !user.accessToken) {
+          console.log(`${getTimestamp()} [${i + 1}] Phase 2: Logging in...`)
+
+          const loginResult = await retryWithBackoff(
+            () => loginDispatcher.dispatch(() =>
+              this.loginUser(user.actualUserName!, user.password)
+            ),
+            { context: `Login ${user.actualUserName}`, maxRetries: 3 }
+          )
+
+          if (!loginResult) {
+            user.reason = 'Login failed after registration'
+            stillFailedUsers.push(user)
+            console.log(`${getTimestamp()} [${i + 1}] ❌ Login failed`)
+            continue
+          }
+
+          user.id = loginResult.userId
+          user.accessToken = loginResult.accessToken
+          user.loginDisplayName = loginResult.displayName
+          user.state = { ...user.state, loggedIn: true }
+          console.log(`${getTimestamp()} [${i + 1}] ✓ Logged in, userId: ${user.id}`)
+        } else {
+          console.log(`${getTimestamp()} [${i + 1}] Phase 2: Skip (already logged in)`)
+        }
+
+        // STEP 3: Character initialization (equipment + phone)
+        if (!user.state?.equipmentSet || !user.state?.phoneUpdated) {
+          console.log(`${getTimestamp()} [${i + 1}] Phase 3: Initializing character...`)
+
+          const userClient = axios.create({
+            baseURL: this.baseUrl,
+            headers: {
+              Authorization: `Bearer ${user.accessToken}`
+            }
+          })
+
+          const defaultDisplayName = user.loginDisplayName || user.actualUserName!
+
+          // Validate display name if not done before
+          if (!user.actualDisplayName) {
+            const validatedDisplayName = await this.validateDisplayName(
+              userClient,
+              user.displayName,
+              user.actualUserName!,
+              defaultDisplayName
+            )
+            user.actualDisplayName = validatedDisplayName || defaultDisplayName
+          }
+
+          // Set equipment if not done
+          if (!user.state?.equipmentSet) {
+            try {
+              await retryWithBackoff(
+                () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!),
+                { context: `Equipment ${user.actualUserName}`, maxRetries: 3 }
+              )
+              user.state = { ...user.state, equipmentSet: true }
+              console.log(`${getTimestamp()} [${i + 1}] ✓ Equipment set`)
+            } catch (error) {
+              console.error(`${getTimestamp()} [${i + 1}] ⚠ Equipment setup failed, continuing...`)
+            }
+          }
+
+          // Update phone if not done
+          if (!user.state?.phoneUpdated && user.phoneNumber) {
+            try {
+              await retryWithBackoff(
+                () => this.updatePhoneNumber(userClient, user.phoneNumber),
+                { context: `Phone ${user.actualUserName}`, maxRetries: 3 }
+              )
+              user.state = { ...user.state, phoneUpdated: true }
+              console.log(`${getTimestamp()} [${i + 1}] ✓ Phone updated`)
+            } catch (error) {
+              console.error(`${getTimestamp()} [${i + 1}] ⚠ Phone update failed, continuing...`)
+            }
+          }
+        } else {
+          console.log(`${getTimestamp()} [${i + 1}] Phase 3: Skip (already initialized)`)
+        }
+
+        // Clear error reason and add to successful
+        user.reason = undefined
+        successfulUsers.push(user)
+        console.log(`${getTimestamp()} [${i + 1}] ✅ User completed successfully: ${user.actualUserName}`)
+
+      } catch (error: any) {
+        user.reason = error.message || 'Unknown error during retry'
+        user.retryCount = (user.retryCount || 0) + 1
+        stillFailedUsers.push(user)
+        console.log(`${getTimestamp()} [${i + 1}] ❌ Error: ${error.message}`)
+      }
+    }
+
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`\n${getTimestamp()} Retry completed in ${totalTime}s`)
+    console.log(`${getTimestamp()} Success: ${successfulUsers.length} | Still failed: ${stillFailedUsers.length}`)
+
+    return { successfulUsers, stillFailedUsers }
+  }
 }

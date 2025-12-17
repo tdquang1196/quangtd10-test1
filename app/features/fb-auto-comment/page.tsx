@@ -42,6 +42,25 @@ export default function FBAutoCommentPage() {
     // Logs state
     const [logs, setLogs] = useState<LogEntry[]>([]);
 
+    // Failed posts state
+    interface FailedPost {
+        postId: string;
+        postPreview: string;
+        error: string;
+        timestamp: string;
+        resolved: boolean;
+    }
+    const [failedPosts, setFailedPosts] = useState<FailedPost[]>([]);
+
+    // Private posts state (Only Me posts that are skipped)
+    interface PrivatePost {
+        postId: string;
+        postPreview: string;
+        privacy: string;
+        timestamp: string;
+    }
+    const [privatePosts, setPrivatePosts] = useState<PrivatePost[]>([]);
+
     // UI state
     const [loading, setLoading] = useState(false);
     const [verifying, setVerifying] = useState(false);
@@ -147,6 +166,16 @@ export default function FBAutoCommentPage() {
             if (statusData.logs && statusData.logs.length > 0) {
                 setLogs(statusData.logs);
                 saveToLocalStorage('logs', statusData.logs);
+            }
+
+            // Update failed posts
+            if (statusData.failedPosts) {
+                setFailedPosts(statusData.failedPosts);
+            }
+
+            // Update private posts
+            if (statusData.privatePosts) {
+                setPrivatePosts(statusData.privatePosts);
             }
         } catch (error) {
             console.error('Error refreshing status:', error);
@@ -421,6 +450,66 @@ export default function FBAutoCommentPage() {
             saveToLocalStorage('logs', []);
         } catch (error) {
             console.error('Error clearing logs:', error);
+        }
+    };
+
+    const resolveFailedPost = async (postId: string) => {
+        try {
+            const res = await fetch('/api/fb-auto-comment/scheduler', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'resolveFailedPost', postId }),
+            });
+            const data = await res.json();
+            if (data.failedPosts) {
+                setFailedPosts(data.failedPosts);
+            }
+        } catch (error) {
+            console.error('Error resolving failed post:', error);
+        }
+    };
+
+    const clearFailedPosts = async () => {
+        try {
+            const res = await fetch('/api/fb-auto-comment/scheduler', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'clearFailedPosts' }),
+            });
+            const data = await res.json();
+            setFailedPosts([]);
+        } catch (error) {
+            console.error('Error clearing failed posts:', error);
+        }
+    };
+
+    const removePrivatePost = async (postId: string) => {
+        try {
+            const res = await fetch('/api/fb-auto-comment/scheduler', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'removePrivatePost', postId }),
+            });
+            const data = await res.json();
+            if (data.privatePosts) {
+                setPrivatePosts(data.privatePosts);
+            }
+        } catch (error) {
+            console.error('Error removing private post:', error);
+        }
+    };
+
+    const clearPrivatePosts = async () => {
+        try {
+            const res = await fetch('/api/fb-auto-comment/scheduler', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'clearPrivatePosts' }),
+            });
+            const data = await res.json();
+            setPrivatePosts([]);
+        } catch (error) {
+            console.error('Error clearing private posts:', error);
         }
     };
 
@@ -791,6 +880,111 @@ export default function FBAutoCommentPage() {
                                 </div>
                             )}
                         </div>
+
+                        {/* Failed Posts Section */}
+                        {failedPosts.filter(fp => !fp.resolved).length > 0 && (
+                            <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-semibold text-red-700 flex items-center gap-2">
+                                        ⚠️ Bài viết lỗi ({failedPosts.filter(fp => !fp.resolved).length})
+                                    </h3>
+                                    <button
+                                        onClick={clearFailedPosts}
+                                        className="text-xs text-red-600 hover:text-red-700 underline"
+                                    >
+                                        Xóa tất cả
+                                    </button>
+                                </div>
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                    {failedPosts.filter(fp => !fp.resolved).map((fp) => (
+                                        <div
+                                            key={fp.postId}
+                                            className="bg-white rounded-lg p-3 border border-red-100 flex items-start justify-between gap-3"
+                                        >
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-medium text-gray-800 truncate">
+                                                    {fp.postPreview}
+                                                </div>
+                                                <div className="text-xs text-red-600 mt-1">
+                                                    {fp.error}
+                                                </div>
+                                                <div className="text-xs text-gray-400 mt-1">
+                                                    {new Date(fp.timestamp).toLocaleString('vi-VN')}
+                                                </div>
+                                                <a
+                                                    href={`https://facebook.com/${fp.postId}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-xs text-blue-600 hover:underline mt-1 inline-block"
+                                                >
+                                                    🔗 Xem trên Facebook
+                                                </a>
+                                            </div>
+                                            <button
+                                                onClick={() => resolveFailedPost(fp.postId)}
+                                                className="px-3 py-1.5 bg-green-100 hover:bg-green-200 text-green-700 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+                                            >
+                                                ✓ Đã xử lý
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Private Posts Section */}
+                        {privatePosts.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h3 className="text-sm font-semibold text-amber-700 flex items-center gap-2">
+                                        🔒 Bài viết riêng tư - đang skip ({privatePosts.length})
+                                    </h3>
+                                    <button
+                                        onClick={clearPrivatePosts}
+                                        className="text-xs text-amber-600 hover:text-amber-700 underline"
+                                    >
+                                        Xóa tất cả (cho phép retry)
+                                    </button>
+                                </div>
+                                <p className="text-xs text-amber-600 mb-3">
+                                    Những bài này sẽ được skip tự động. Nếu đã đổi privacy, bấm "Retry" để thử lại.
+                                </p>
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                    {privatePosts.map((pp) => (
+                                        <div
+                                            key={pp.postId}
+                                            className="bg-white rounded-lg p-3 border border-amber-100 flex items-start justify-between gap-3"
+                                        >
+                                            <div className="flex-1 min-w-0">
+                                                <div className="text-sm font-medium text-gray-800 truncate">
+                                                    {pp.postPreview}
+                                                </div>
+                                                <div className="text-xs text-amber-600 mt-1">
+                                                    Lý do: {pp.privacy === 'SELF' ? 'Only Me' : pp.privacy}
+                                                </div>
+                                                <div className="text-xs text-gray-400 mt-1">
+                                                    {new Date(pp.timestamp).toLocaleString('vi-VN')}
+                                                </div>
+                                                <a
+                                                    href={`https://facebook.com/${pp.postId}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="text-xs text-blue-600 hover:underline mt-1 inline-block"
+                                                >
+                                                    🔗 Xem trên Facebook
+                                                </a>
+                                            </div>
+                                            <button
+                                                onClick={() => removePrivatePost(pp.postId)}
+                                                className="px-3 py-1.5 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-xs font-medium transition-colors whitespace-nowrap"
+                                            >
+                                                🔄 Retry
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* Logs */}
                         <div className="bg-slate-800 rounded-xl p-4 h-96 overflow-y-auto font-mono text-sm border border-slate-700">

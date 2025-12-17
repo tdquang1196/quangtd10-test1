@@ -15,11 +15,12 @@ interface PaginatedResponse<T> {
 }
 
 /**
- * Get all posts from a page
+ * Get all posts from a page (includes privacy info)
  */
 export async function getAllPosts(pageId: string, accessToken: string): Promise<FBPost[]> {
     const allPosts: FBPost[] = [];
-    let nextUrl: string | null = `${BASE_URL}/${pageId}/posts?fields=id,message,created_time&limit=25&access_token=${accessToken}`;
+    // Added privacy field to detect Only Me posts
+    let nextUrl: string | null = `${BASE_URL}/${pageId}/posts?fields=id,message,created_time,privacy&limit=25&access_token=${accessToken}`;
 
     while (nextUrl) {
         try {
@@ -159,7 +160,7 @@ export async function postComment(
     postId: string,
     message: string,
     accessToken: string
-): Promise<string | null> {
+): Promise<{ id: string | null; error?: string }> {
     try {
         const response = await fetch(`${BASE_URL}/${postId}/comments`, {
             method: 'POST',
@@ -175,13 +176,15 @@ export async function postComment(
         const data = await response.json();
 
         if (data.error) {
-            throw new Error(data.error.message);
+            const errorMsg = `[${data.error.code || 'unknown'}] ${data.error.message}`;
+            console.error(`Error posting comment to ${postId}:`, errorMsg);
+            return { id: null, error: errorMsg };
         }
 
-        return data.id;
-    } catch (error) {
+        return { id: data.id };
+    } catch (error: any) {
         console.error('Error posting comment:', error);
-        return null;
+        return { id: null, error: error.message };
     }
 }
 

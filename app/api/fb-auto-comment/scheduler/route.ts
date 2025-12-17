@@ -10,17 +10,25 @@ import {
     runAutoComment,
     requestAbort,
     getIsProcessRunning,
-    getLogs
+    getLogs,
+    getFailedPosts,
+    resolveFailedPost,
+    clearFailedPosts,
+    getPrivatePosts,
+    removePrivatePost,
+    clearPrivatePosts
 } from '@/lib/fb-auto-comment/scheduler';
 import { ScanMode, FBConfig } from '@/lib/fb-auto-comment/types';
 
-// GET - Get scheduler status and logs
+// GET - Get scheduler status, logs, failed posts, and private posts
 export async function GET() {
     try {
         const status = getSchedulerStatus();
         const isProcessRunning = getIsProcessRunning();
         const logs = getLogs();
-        return NextResponse.json({ status, isProcessRunning, logs });
+        const failedPosts = getFailedPosts();
+        const privatePosts = getPrivatePosts();
+        return NextResponse.json({ status, isProcessRunning, logs, failedPosts, privatePosts });
     } catch (error: any) {
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
@@ -41,6 +49,30 @@ export async function POST(request: NextRequest) {
             case 'abort':
                 requestAbort();
                 return NextResponse.json({ success: true, message: 'Abort requested' });
+
+            case 'resolveFailedPost':
+                const { postId } = body;
+                if (!postId) {
+                    return NextResponse.json({ error: 'Missing postId' }, { status: 400 });
+                }
+                resolveFailedPost(postId);
+                return NextResponse.json({ success: true, failedPosts: getFailedPosts() });
+
+            case 'clearFailedPosts':
+                clearFailedPosts();
+                return NextResponse.json({ success: true, failedPosts: [] });
+
+            case 'removePrivatePost':
+                const { postId: privatePostId } = body;
+                if (!privatePostId) {
+                    return NextResponse.json({ error: 'Missing postId' }, { status: 400 });
+                }
+                removePrivatePost(privatePostId);
+                return NextResponse.json({ success: true, privatePosts: getPrivatePosts() });
+
+            case 'clearPrivatePosts':
+                clearPrivatePosts();
+                return NextResponse.json({ success: true, privatePosts: [] });
 
             case 'runOnce':
                 // Validate required data from client
@@ -73,7 +105,9 @@ export async function POST(request: NextRequest) {
                     success: true,
                     result,
                     scanState: result.scanState,
-                    logs: getLogs()
+                    logs: getLogs(),
+                    failedPosts: getFailedPosts(),
+                    privatePosts: getPrivatePosts()
                 });
 
             default:
