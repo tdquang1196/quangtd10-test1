@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { MigrationService } from '@/lib/migrationService'
+import { setActiveMigrationService } from './control/route'
 
 interface UserData {
   username: string
@@ -56,14 +57,15 @@ export async function POST(request: NextRequest) {
     }))
 
     // Initialize migration service
-    // We pass adminUsername/password as empty strings if we have a token, 
-    // but keep them if we want to fallback (though new logic prefers token)
     const migrationService = new MigrationService(
       apiUrl,
       adminUsername || '',
       adminPassword || '',
       authToken
     )
+
+    // Store reference for pause/resume/cancel control
+    setActiveMigrationService(migrationService)
 
     // Execute migration
     console.log('Starting migration...')
@@ -89,12 +91,19 @@ export async function POST(request: NextRequest) {
       ListDataClasses: result.listDataClasses,
       ListUserError: result.listUserError,
       ListClassError: result.listClassError,
-      roleAssignmentError: result.roleAssignmentError
+      roleAssignmentError: result.roleAssignmentError,
+      migrationStatus: migrationService.status,
     }
+
+    // Clear the active migration service reference
+    setActiveMigrationService(null)
 
     return NextResponse.json(response)
   } catch (error) {
     console.error('Migration API error:', error)
+
+    // Clear the active migration service reference on error
+    setActiveMigrationService(null)
 
     return NextResponse.json(
       {

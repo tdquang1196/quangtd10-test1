@@ -1,9 +1,21 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import * as XLSX from 'xlsx'
 import { processExcelData } from '@/utils/bulkRegistrationUtils'
 import { StudentData, TeacherData, MigrationResult, NotificationState, TabType } from '@/types'
 import { givePackageToUser } from '@/lib/api/users'
+import {
+  MigrationStatus,
+  MigrationProgress
+} from '@/lib/migrationService'
+import {
+  MigrationState,
+  saveMigrationState,
+  loadMigrationState,
+  clearMigrationState,
+  hasResumableState,
+  generateSessionId,
+} from '@/lib/migrationState'
 
 export const useMigration = () => {
   const [file, setFile] = useState<File | null>(null)
@@ -62,6 +74,19 @@ export const useMigration = () => {
     source: string
   } | null>(null)
   const [retryingSchoolIndex, setRetryingSchoolIndex] = useState<number | null>(null)
+
+  // Migration control state (pause/resume/cancel)
+  const [migrationStatus, setMigrationStatus] = useState<MigrationStatus>('idle')
+  const [migrationProgress, setMigrationProgress] = useState<MigrationProgress | null>(null)
+  const [migrationSessionId, setMigrationSessionId] = useState<string | null>(null)
+  const [canResume, setCanResume] = useState(false)
+
+  // Check for resumable state on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setCanResume(hasResumableState())
+    }
+  }, [])
 
   // Batch upload form state (persisted when navigating between tabs)
   const [batchSchoolsForm, setBatchSchoolsForm] = useState<Array<{
@@ -520,6 +545,8 @@ export const useMigration = () => {
     }
 
     setIsCreating(true)
+    setMigrationStatus('running')
+    setMigrationSessionId(generateSessionId())
     setProgressMessage(`Processing ${students.length} students and ${teachers.length} teachers...`)
     setCreatedUsers([])
     setFailedUsers([])
@@ -587,6 +614,9 @@ export const useMigration = () => {
       setFailedUsers(allFailed)
 
       setIsCreating(false)
+      // Update migration status based on API response
+      setMigrationStatus(apiResult.migrationStatus || 'completed')
+      clearMigrationState() // Clear saved state on completion
       setActiveTab('results')
 
       const successCount = allCreated.length
@@ -606,6 +636,7 @@ export const useMigration = () => {
     } catch (error) {
       console.error('Migration error:', error)
       setIsCreating(false)
+      setMigrationStatus('idle')
       showNotification(error instanceof Error ? error.message : 'Unknown error occurred', 'error')
     }
   }
@@ -788,6 +819,8 @@ export const useMigration = () => {
     if (batchPreviewData.length === 0) return
 
     setIsBatchProcessing(true)
+    setMigrationStatus('running')
+    setMigrationSessionId(generateSessionId())
     setTotalSchools(batchPreviewData.length)
     setCurrentSchoolIndex(0)
     setBatchResults([])
@@ -948,6 +981,8 @@ export const useMigration = () => {
 
     setBatchResults(results)
     setIsBatchProcessing(false)
+    setMigrationStatus('completed')
+    clearMigrationState()
     setProgressMessage('')
 
     const totalSuccess = results.reduce((sum, r) => sum + (r.students?.length || 0) + (r.teachers?.length || 0), 0)
@@ -1418,6 +1453,138 @@ export const useMigration = () => {
     }
   }
 
+  // ===== MIGRATION CONTROL FUNCTIONS (pause/resume/cancel) =====
+
+  /**
+   * Pause the current migration
+   */
+  const pauseMigration = useCallback(async () => {
+    if (migrationStatus !== 'running') {
+      showNotification('No running migration to pause', 'warning')
+      return
+    }
+
+    try {
+      const token = localStorage.getItem('auth_token')
+      await axios.post('/api/migrate/control', { action: 'pause' }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setMigrationStatus('paused')
+      showNotification('Migration paused', 'info')
+
+      // Save state for resume
+      if (migrationProgress) {
+        const state: MigrationState = {
+          sessionId: migrationSessionId || generateSessionId(),
+          status: 'paused',
+          startTime: Date.now(),
+          lastUpdated: Date.now(),
+          currentPhase: migrationProgress.phase,
+          currentUserIndex: migrationProgress.currentIndex,
+          totalUsers: migrationProgress.totalUsers,
+          processedRegistrations: migrationProgress.processedRegistrations,
+          processedLogins: migrationProgress.processedLogins,
+          processedInits: migrationProgress.processedInits,
+          processedClasses: migrationProgress.processedClasses,
+          students: migrationProgress.students as any[],
+          teachers: migrationProgress.teachers as any[],
+          classes: migrationProgress.classes,
+          listUserError: migrationProgress.listUserError as any[],
+          listClassError: migrationProgress.listClassError,
+          schoolPrefix: schoolPrefix,
+        }
+        saveMigrationState(state)
+        setCanResume(true)
+      }
+    } catch (error: any) {
+      console.error('Pause error:', error)
+      showNotification('Failed to pause migration', 'error')
+    }
+  }, [migrationStatus, migrationProgress, migrationSessionId, schoolPrefix])
+
+  /**
+   * Resume a paused or saved migration
+   */
+  const resumeMigration = useCallback(async () => {
+    // Check for saved state
+    const savedState = loadMigrationState()
+
+    if (!savedState && migrationStatus !== 'paused') {
+      showNotification('No migration to resume', 'warning')
+      return
+    }
+
+    try {
+      const token = localStorage.getItem('auth_token')
+      await axios.post('/api/migrate/control', { action: 'resume' }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setMigrationStatus('running')
+      showNotification('Migration resumed', 'info')
+    } catch (error: any) {
+      console.error('Resume error:', error)
+      showNotification('Failed to resume migration', 'error')
+    }
+  }, [migrationStatus])
+
+  /**
+   * Cancel the current migration (keeps created data)
+   */
+  const cancelMigration = useCallback(async () => {
+    if (migrationStatus !== 'running' && migrationStatus !== 'paused') {
+      showNotification('No migration to cancel', 'warning')
+      return
+    }
+
+    try {
+      const token = localStorage.getItem('auth_token')
+      await axios.post('/api/migrate/control', { action: 'cancel' }, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      setMigrationStatus('cancelled')
+      clearMigrationState()
+      setCanResume(false)
+      showNotification('Migration cancelled. Created users/classes have been kept.', 'warning')
+    } catch (error: any) {
+      console.error('Cancel error:', error)
+      showNotification('Failed to cancel migration', 'error')
+    }
+  }, [migrationStatus])
+
+  /**
+   * Clear saved migration state
+   */
+  const clearSavedMigration = useCallback(() => {
+    clearMigrationState()
+    setCanResume(false)
+    setMigrationProgress(null)
+    showNotification('Saved migration state cleared', 'info')
+  }, [])
+
+  /**
+   * Get progress percentage (0-100)
+   */
+  const getProgressPercentage = useCallback((): number => {
+    if (!migrationProgress || migrationProgress.totalUsers === 0) return 0
+
+    const weights = { registration: 0.3, login: 0.2, initialization: 0.3, classes: 0.15, roles: 0.05 }
+    let progress = 0
+
+    progress += (migrationProgress.processedRegistrations / migrationProgress.totalUsers) * weights.registration * 100
+    progress += (migrationProgress.processedLogins / migrationProgress.totalUsers) * weights.login * 100
+    progress += (migrationProgress.processedInits / migrationProgress.totalUsers) * weights.initialization * 100
+
+    if (migrationProgress.totalClasses > 0) {
+      progress += (migrationProgress.processedClasses / migrationProgress.totalClasses) * weights.classes * 100
+    }
+
+    if (migrationProgress.phase === 'completed') {
+      progress = 100
+    }
+
+    return Math.min(100, Math.round(progress))
+  }, [migrationProgress])
+
   return {
     // State
     file,
@@ -1481,5 +1648,17 @@ export const useMigration = () => {
     setSubscriptionRequester,
     setSubscriptionSource,
     retryFailedPackages,
+    // Migration control (pause/resume/cancel)
+    migrationStatus,
+    migrationProgress,
+    migrationSessionId,
+    canResume,
+    pauseMigration,
+    resumeMigration,
+    cancelMigration,
+    clearSavedMigration,
+    getProgressPercentage,
+    setMigrationStatus,
+    setMigrationProgress,
   }
 }

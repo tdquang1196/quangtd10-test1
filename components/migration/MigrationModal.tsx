@@ -9,6 +9,7 @@ import BatchPreviewTab from './BatchPreviewTab'
 import PreviewTab from './PreviewTab'
 import ResultsTab from './ResultsTab'
 import BatchResultsTab from './BatchResultsTab'
+import MigrationControlBar from './MigrationControlBar'
 import { MigrationModalProps } from '@/types'
 import { useState } from 'react'
 
@@ -114,6 +115,24 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
             ))}
           </div>
         </div>
+
+        {/* Migration Control Bar (pause/resume/cancel) */}
+        <MigrationControlBar
+          status={migration.migrationStatus}
+          progress={migration.getProgressPercentage()}
+          phase={migration.migrationProgress?.phase}
+          canResume={migration.canResume}
+          onPause={migration.pauseMigration}
+          onResume={migration.resumeMigration}
+          onCancel={migration.cancelMigration}
+          onClearSaved={migration.clearSavedMigration}
+          isVisible={
+            migration.migrationStatus !== 'idle' ||
+            migration.canResume ||
+            migration.isCreating ||
+            migration.isBatchProcessing
+          }
+        />
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-8 bg-gray-50/30">

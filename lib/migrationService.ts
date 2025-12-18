@@ -147,12 +147,146 @@ class ThrottledDispatcher {
   }
 }
 
+// Migration status type
+export type MigrationStatus = 'idle' | 'running' | 'paused' | 'cancelled' | 'completed'
+
+// Progress callback type
+export interface MigrationProgress {
+  status: MigrationStatus
+  phase: 'registration' | 'login' | 'initialization' | 'classes' | 'roles' | 'completed'
+  currentIndex: number
+  totalUsers: number
+  processedRegistrations: number
+  processedLogins: number
+  processedInits: number
+  processedClasses: number
+  totalClasses: number
+  students: UserData[]
+  teachers: UserData[]
+  classes: any[]
+  listUserError: UserData[]
+  listClassError: any[]
+}
+
 export class MigrationService {
   private baseUrl: string
   private adminUsername: string
   private adminPassword: string
   private adminClient?: AxiosInstance
   private adminToken?: string
+
+  // Pause/Resume/Cancel state
+  private _status: MigrationStatus = 'idle'
+  private _pausePromise: Promise<void> | null = null
+  private _pauseResolver: (() => void) | null = null
+  private _onProgressCallback?: (progress: MigrationProgress) => void
+
+  // Public getters
+  public get status(): MigrationStatus {
+    return this._status
+  }
+
+  /**
+   * Pause the migration process
+   * The process will pause at the next checkpoint (after current user completes)
+   */
+  public pause(): void {
+    if (this._status !== 'running') {
+      console.log(`[MigrationService] Cannot pause: status is ${this._status}`)
+      return
+    }
+    console.log('[MigrationService] Pausing migration...')
+    this._status = 'paused'
+    this._pausePromise = new Promise<void>((resolve) => {
+      this._pauseResolver = resolve
+    })
+  }
+
+  /**
+   * Resume the migration process after pause
+   */
+  public resume(): void {
+    if (this._status !== 'paused') {
+      console.log(`[MigrationService] Cannot resume: status is ${this._status}`)
+      return
+    }
+    console.log('[MigrationService] Resuming migration...')
+    this._status = 'running'
+    if (this._pauseResolver) {
+      this._pauseResolver()
+      this._pauseResolver = null
+      this._pausePromise = null
+    }
+  }
+
+  /**
+   * Cancel the migration process
+   * Created users/classes will be kept (no rollback)
+   */
+  public cancel(): void {
+    if (this._status !== 'running' && this._status !== 'paused') {
+      console.log(`[MigrationService] Cannot cancel: status is ${this._status}`)
+      return
+    }
+    console.log('[MigrationService] Cancelling migration...')
+    this._status = 'cancelled'
+    // If paused, resolve the promise to unblock
+    if (this._pauseResolver) {
+      this._pauseResolver()
+      this._pauseResolver = null
+      this._pausePromise = null
+    }
+  }
+
+  /**
+   * Reset status to idle (call after migration completes or is cancelled)
+   */
+  public reset(): void {
+    this._status = 'idle'
+    this._pausePromise = null
+    this._pauseResolver = null
+  }
+
+  /**
+   * Set progress callback to receive updates during migration
+   */
+  public onProgress(callback: (progress: MigrationProgress) => void): void {
+    this._onProgressCallback = callback
+  }
+
+  /**
+   * Check if should pause or cancel, and wait if paused
+   * Returns true if should break (cancelled), false to continue
+   */
+  private async checkPauseOrCancel(): Promise<boolean> {
+    if (this._status === 'cancelled') {
+      return true // Signal to break
+    }
+
+    if (this._status === 'paused' && this._pausePromise) {
+      console.log('[MigrationService] Waiting for resume...')
+      await this._pausePromise
+      // After resume, check if cancelled during pause (read again since status may have changed)
+      const statusAfterResume = this._status as MigrationStatus
+      if (statusAfterResume === 'cancelled') {
+        return true
+      }
+    }
+
+    return false // Continue processing
+  }
+
+  /**
+   * Emit progress update
+   */
+  private emitProgress(progress: Omit<MigrationProgress, 'status'>): void {
+    if (this._onProgressCallback) {
+      this._onProgressCallback({
+        ...progress,
+        status: this._status,
+      })
+    }
+  }
 
   constructor(baseUrl: string, adminUsername: string, adminPassword: string, authToken?: string) {
     this.baseUrl = baseUrl
@@ -804,11 +938,39 @@ export class MigrationService {
     teachers: UserData[],
     classes: UserData[]
   ): Promise<MigrationResult> {
+    // Set status to running
+    this._status = 'running'
+
     const startTime = Date.now()
     const getTimestamp = () => {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
       const now = new Date().toLocaleTimeString('en-US', { hour12: false })
       return `[${now}] [+${elapsed}s]`
+    }
+
+    // Progress tracking variables for pause/resume (prefixed to avoid name collision)
+    let _pReg = 0
+    let _pLog = 0
+    let _pInit = 0
+    let _pClass = 0
+
+    // Helper to emit progress
+    const emitCurrentProgress = (phase: 'registration' | 'login' | 'initialization' | 'classes' | 'roles' | 'completed') => {
+      this.emitProgress({
+        phase,
+        currentIndex: _pReg + _pLog + _pInit + _pClass,
+        totalUsers: students.length + teachers.length,
+        processedRegistrations: _pReg,
+        processedLogins: _pLog,
+        processedInits: _pInit,
+        processedClasses: _pClass,
+        totalClasses: classes.length,
+        students,
+        teachers,
+        classes,
+        listUserError,
+        listClassError,
+      })
     }
 
     // Login as admin
@@ -906,11 +1068,19 @@ export class MigrationService {
       try {
         // Process users in this group sequentially to ensure unique usernames
         for (const user of usersInGroup) {
+          // Check for pause/cancel at start of each user
+          if (await this.checkPauseOrCancel()) {
+            console.log(`${getTimestamp()} [Registration] Migration cancelled/paused`)
+            return // Exit this group processing
+          }
+
           try {
             // Skip if already registered
             if (user.state?.registered) {
               console.log(`${getTimestamp()} [Registration] Skip ${user.username} (already registered)`)
               completedRegistrations++
+              _pReg++
+              emitCurrentProgress('registration')
               continue
             }
 
@@ -936,6 +1106,8 @@ export class MigrationService {
               user.reason = registerResult.error || 'Registration failed'
               listUserError.push({ ...user })
               completedRegistrations++
+              _pReg++
+              emitCurrentProgress('registration')
               console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - FAILED: ${user.username}`)
               continue
             }
@@ -944,12 +1116,16 @@ export class MigrationService {
             user.state = { ...user.state, registered: true }
             user.retryCount = 0
             completedRegistrations++
+            _pReg++
+            emitCurrentProgress('registration')
             console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - OK: ${user.actualUserName}`)
           } catch (error: any) {
             user.reason = error.message || 'Unknown error'
             user.retryCount = (user.retryCount || 0) + 1
             listUserError.push({ ...user })
             completedRegistrations++
+            _pReg++
+            emitCurrentProgress('registration')
             console.log(`${getTimestamp()} [Registration] ${completedRegistrations}/${allUsers.length} - ERROR: ${user.username} - ${error.message}`)
           }
         }
@@ -981,11 +1157,19 @@ export class MigrationService {
     let completedLogins = 0
 
     const loginPromises = registeredUsers.map(async (user) => {
+      // Check for pause/cancel
+      if (await this.checkPauseOrCancel()) {
+        console.log(`${getTimestamp()} [Login] Migration cancelled/paused`)
+        return
+      }
+
       try {
         // Skip if already logged in
         if (user.state?.loggedIn) {
           console.log(`${getTimestamp()} [Login] Skip ${user.actualUserName} (already logged in)`)
           completedLogins++
+          _pLog++
+          emitCurrentProgress('login')
           return
         }
 
@@ -1001,6 +1185,8 @@ export class MigrationService {
           user.reason = 'Login failed after registration'
           listUserError.push({ ...user })
           completedLogins++
+          _pLog++
+          emitCurrentProgress('login')
           console.log(`${getTimestamp()} [Login] ${completedLogins}/${registeredUsers.length} - FAILED: ${user.actualUserName}`)
           return
         }
@@ -1011,12 +1197,16 @@ export class MigrationService {
         user.state = { ...user.state, loggedIn: true }
 
         completedLogins++
+        _pLog++
+        emitCurrentProgress('login')
         console.log(`${getTimestamp()} [Login] ${completedLogins}/${registeredUsers.length} - OK: ${user.actualUserName}`)
       } catch (error: any) {
         user.reason = error.message || 'Login error'
         user.retryCount = (user.retryCount || 0) + 1
         listUserError.push({ ...user })
         completedLogins++
+        _pLog++
+        emitCurrentProgress('login')
         console.log(`${getTimestamp()} [Login] ${completedLogins}/${registeredUsers.length} - ERROR: ${user.actualUserName} - ${error.message}`)
       }
     })
@@ -1036,6 +1226,8 @@ export class MigrationService {
     const displayNameGroups = this.groupByDisplayName(successfullyRegistered)
     console.log(`${getTimestamp()} Grouped ${successfullyRegistered.length} users into ${displayNameGroups.size} display name groups`)
 
+
+    // Counter for this phase
     let processedInits = 0
 
     // Convert groups to array
@@ -1060,8 +1252,16 @@ export class MigrationService {
       try {
         // Process users in this group sequentially to ensure unique display names
         for (const user of usersInGroup) {
+          // Check for pause/cancel
+          if (await this.checkPauseOrCancel()) {
+            console.log(`${getTimestamp()} [Initialization] Migration cancelled/paused`)
+            return
+          }
+
           await this.initializeUserCharacter(user, listUserError)
           processedInits++
+          _pInit++
+          emitCurrentProgress('initialization')
           console.log(`${getTimestamp()} [Initialization] ${processedInits}/${successfullyRegistered.length} - Initialized: ${user.actualUserName} (${user.actualDisplayName || user.displayName})`)
         }
       } finally {
@@ -1088,6 +1288,12 @@ export class MigrationService {
     // Process classes
     console.log(`${getTimestamp()} Processing ${classes.length} classes...`)
     for (let i = 0; i < classes.length; i++) {
+      // Check for pause/cancel
+      if (await this.checkPauseOrCancel()) {
+        console.log(`${getTimestamp()} [Classes] Migration cancelled/paused`)
+        break
+      }
+
       const classItem = classes[i]
       console.log(`${getTimestamp()} [${i + 1}/${classes.length}] Processing class: ${classItem.username}`)
       try {
@@ -1182,6 +1388,10 @@ export class MigrationService {
         classItem.reason = error.response?.data?.message || error.message
         listClassError.push({ ...classItem })
       }
+
+      // Update progress after each class
+      _pClass++
+      emitCurrentProgress('classes')
     }
 
     // ===== PHASE 4: ASSIGN TEACHERS TO ROLE =====
@@ -1209,7 +1419,18 @@ export class MigrationService {
     }
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.log(`${getTimestamp()} Migration completed in ${totalTime}s`)
+
+    // Set final status (read into variable to avoid TS narrowing issue)
+    const finalStatus = this._status as MigrationStatus
+    if (finalStatus === 'cancelled') {
+      console.log(`${getTimestamp()} Migration CANCELLED after ${totalTime}s`)
+      emitCurrentProgress('completed')
+    } else {
+      this._status = 'completed'
+      console.log(`${getTimestamp()} Migration completed in ${totalTime}s`)
+      emitCurrentProgress('completed')
+    }
+
     console.log(`${getTimestamp()} Success: ${students.length + teachersToCreate.length - listUserError.length} users (${students.length} students, ${teachersToCreate.length} teachers)`)
     console.log(`${getTimestamp()} Failed: ${listUserError.length} users`)
     console.log(`${getTimestamp()} Teachers skipped (existing classes): ${teachers.length - teachersToCreate.length}`)
