@@ -108,7 +108,7 @@ const MAX_LENGTH_DISPLAY_NAME = 20
 // Rate limiting configuration
 const REGISTER_RATE = 2 // 2 requests/second for register API
 const LOGIN_RATE = 2 // 2 requests/second for login API
-const MAX_CONCURRENT_GROUPS = 5 // Maximum number of display name groups to process in parallel
+const MAX_CONCURRENT_GROUPS = 2 // Maximum number of display name groups to process in parallel
 
 /**
  * Throttled dispatcher for rate-limited parallel request dispatching.

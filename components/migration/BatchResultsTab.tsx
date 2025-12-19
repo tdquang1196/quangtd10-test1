@@ -16,6 +16,7 @@ interface SchoolResult {
         failed: number
         failedUsers: Array<{ userId: string; username?: string; displayName?: string; error: string }>
     } | null
+    roleAssignmentError?: string
 }
 
 interface BatchResultsTabProps {
@@ -23,10 +24,11 @@ interface BatchResultsTabProps {
     onClose: () => void
     retryBatchSchoolPackages?: (schoolIndex: number) => Promise<void>
     retryBatchSchoolFailedUsers?: (schoolIndex: number) => Promise<void>
+    retryBatchSchoolRoleAssignment?: (schoolIndex: number) => Promise<void>
     retryingSchoolIndex?: number | null
 }
 
-export default function BatchResultsTab({ results, onClose, retryBatchSchoolPackages, retryBatchSchoolFailedUsers, retryingSchoolIndex }: BatchResultsTabProps) {
+export default function BatchResultsTab({ results, onClose, retryBatchSchoolPackages, retryBatchSchoolFailedUsers, retryBatchSchoolRoleAssignment, retryingSchoolIndex }: BatchResultsTabProps) {
     const [expandedSchools, setExpandedSchools] = useState<Set<string>>(new Set(results.map(r => r.schoolPrefix)))
 
     const toggleSchool = (prefix: string) => {
@@ -284,6 +286,55 @@ export default function BatchResultsTab({ results, onClose, retryBatchSchoolPack
                                                         ))}
                                                     </tbody>
                                                 </table>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Role Assignment Error */}
+                                    {result.roleAssignmentError && (
+                                        <div className="p-4 rounded-lg border-2 bg-orange-50 border-orange-300">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0">
+                                                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                                    </svg>
+                                                </div>
+                                                <div className="flex-1">
+                                                    <h5 className="font-semibold text-orange-900">
+                                                        👨‍🏫 Teacher Role Assignment Failed
+                                                    </h5>
+                                                    <p className="text-sm text-orange-700">
+                                                        {result.roleAssignmentError}
+                                                    </p>
+                                                    <p className="text-xs text-orange-600 mt-1">
+                                                        Teachers were created but not assigned to the "Teacher" role.
+                                                    </p>
+                                                </div>
+                                                {retryBatchSchoolRoleAssignment && (
+                                                    <Button
+                                                        onClick={() => retryBatchSchoolRoleAssignment(index)}
+                                                        variant="secondary"
+                                                        size="sm"
+                                                        disabled={retryingSchoolIndex === index}
+                                                    >
+                                                        {retryingSchoolIndex === index ? (
+                                                            <>
+                                                                <svg className="animate-spin w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                                </svg>
+                                                                Retrying...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                                                </svg>
+                                                                Retry Role Assignment
+                                                            </>
+                                                        )}
+                                                    </Button>
+                                                )}
                                             </div>
                                         </div>
                                     )}

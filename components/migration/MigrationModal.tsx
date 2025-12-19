@@ -203,6 +203,7 @@ export default function MigrationModal({ isOpen, onClose }: MigrationModalProps)
                   onClose={handleClose}
                   retryBatchSchoolPackages={migration.retryBatchSchoolPackages}
                   retryBatchSchoolFailedUsers={migration.retryBatchSchoolFailedUsers}
+                  retryBatchSchoolRoleAssignment={migration.retryBatchSchoolRoleAssignment}
                   retryingSchoolIndex={migration.retryingSchoolIndex}
                 />
               )}

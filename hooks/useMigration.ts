@@ -948,7 +948,8 @@ export const useMigration = () => {
           classes: apiResult.ListDataClasses || [],
           failedUsers: apiResult.ListUserError || [],
           failedClasses: apiResult.ListClassError || [],
-          packageAssignment: packageResult
+          packageAssignment: packageResult,
+          roleAssignmentError: apiResult.roleAssignmentError || undefined
         })
 
         const userCount = (apiResult.ListDataStudent?.length || 0) + (apiResult.ListDataTeacher?.length || 0)
@@ -1259,6 +1260,56 @@ export const useMigration = () => {
       )
     } finally {
       setIsCreating(false)
+      setProgressMessage('')
+    }
+  }
+
+  // Retry role assignment for a specific school in batch mode
+  const retryBatchSchoolRoleAssignment = async (schoolIndex: number) => {
+    const school = batchResults[schoolIndex]
+    if (!school || !school.teachers || school.teachers.length === 0) {
+      showNotification('No teachers found for this school', 'warning')
+      return
+    }
+
+    if (!school.roleAssignmentError) {
+      showNotification('No role assignment error for this school', 'info')
+      return
+    }
+
+    setRetryingSchoolIndex(schoolIndex)
+    setProgressMessage(`Retrying role assignment for ${school.schoolPrefix}...`)
+
+    try {
+      const token = localStorage.getItem('auth_token')
+      const response = await axios.post('/api/migrate/retry-role-assignment', {
+        teachers: school.teachers
+      }, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      })
+
+      if (response.data.success) {
+        // Update batch results to clear role assignment error
+        const updatedResults = [...batchResults]
+        updatedResults[schoolIndex] = {
+          ...school,
+          roleAssignmentError: undefined
+        }
+        setBatchResults(updatedResults)
+        showNotification(`✅ ${school.schoolPrefix}: Successfully assigned teachers to role!`, 'success')
+      } else {
+        showNotification(`❌ ${school.schoolPrefix}: Role assignment failed: ${response.data.error}`, 'error')
+      }
+    } catch (error: any) {
+      console.error(`Retry role assignment error for ${school.schoolPrefix}:`, error)
+      showNotification(
+        `Failed to retry role assignment for ${school.schoolPrefix}: ${error.response?.data?.message || error.message}`,
+        'error'
+      )
+    } finally {
+      setRetryingSchoolIndex(null)
       setProgressMessage('')
     }
   }
@@ -1639,6 +1690,7 @@ export const useMigration = () => {
     handleCreateBatch,
     retryBatchSchoolPackages,
     retryBatchSchoolFailedUsers,
+    retryBatchSchoolRoleAssignment,
     retryFailedUsers,
     retryRoleAssignment,
     // Subscription actions
