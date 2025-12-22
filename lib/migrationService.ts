@@ -24,6 +24,8 @@ interface UserData {
     loggedIn?: boolean        // Phase 2 complete
     equipmentSet?: boolean    // Phase 3a complete
     phoneUpdated?: boolean    // Phase 3b complete
+    addedToClass?: boolean    // Phase 4 complete
+    roleAssigned?: boolean    // Phase 5 complete (teachers only)
   }
   retryCount?: number
 }
@@ -1458,9 +1460,19 @@ export class MigrationService {
    * - If not registered: run full registration + login + init
    * - If registered but not logged in: run login + init
    * - If logged in but not initialized: run just init
+   * - After all phases, add users to their groups/classes
+   * 
+   * @param failedUsers - List of users that failed during migration
+   * @param options - Optional: schoolPrefix and classes for group/class assignment
    */
   public async retryUsers(
-    failedUsers: UserData[]
+    failedUsers: UserData[],
+    options?: {
+      schoolPrefix?: string
+      classes?: UserData[]
+      allStudents?: UserData[]
+      allTeachers?: UserData[]
+    }
   ): Promise<{
     successfulUsers: UserData[]
     stillFailedUsers: UserData[]
@@ -1623,6 +1635,241 @@ export class MigrationService {
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(1)
     console.log(`\n${getTimestamp()} Retry completed in ${totalTime}s`)
     console.log(`${getTimestamp()} Success: ${successfulUsers.length} | Still failed: ${stillFailedUsers.length}`)
+
+    // ===== PHASE 4: ADD USERS TO GROUPS/CLASSES =====
+    // Only if we have schoolPrefix and classes info from options
+    // Filter users that haven't been added to class yet
+    const usersNeedingClassAssignment = successfulUsers.filter(u => !u.state?.addedToClass)
+
+    if (options?.schoolPrefix && options?.classes && usersNeedingClassAssignment.length > 0) {
+      console.log(`\n${getTimestamp()} ========== PHASE 4: ADD USERS TO GROUPS/CLASSES ==========`)
+      console.log(`${getTimestamp()} ${usersNeedingClassAssignment.length} users need class assignment (${successfulUsers.length - usersNeedingClassAssignment.length} already assigned)`)
+
+      const schoolPrefix = options.schoolPrefix
+      const classes = options.classes
+      const allStudents = options.allStudents || []
+      const allTeachers = options.allTeachers || []
+
+      // Get existing classes from system
+      const existingClasses = await this.getExistingClasses(schoolPrefix)
+      console.log(`${getTimestamp()} Found ${existingClasses.size} existing classes for prefix: ${schoolPrefix}`)
+
+      // Check for existing admin teacher
+      const existingAdminTeacher = await this.getExistingAdminTeacher(schoolPrefix)
+      const existingAdminTeacherId = existingAdminTeacher?.id || null
+
+      // Process each class that has users needing assignment
+      const classesWithNewUsers = new Set(usersNeedingClassAssignment.map(u => u.classses))
+
+      for (const className of classesWithNewUsers) {
+        if (!className) continue
+
+        const classItem = classes.find((c: UserData) => c.username === className)
+        if (!classItem) continue
+
+        console.log(`${getTimestamp()} Processing class: ${className}`)
+
+        try {
+          // Get all students (including newly succeeded ones) for this class
+          const combinedStudents = [...allStudents]
+          successfulUsers.forEach(u => {
+            const existingIdx = combinedStudents.findIndex(s => s.username === u.username || s.actualUserName === u.actualUserName)
+            if (existingIdx >= 0) {
+              combinedStudents[existingIdx] = { ...combinedStudents[existingIdx], ...u }
+            }
+          })
+
+          const groupStudents = combinedStudents
+            .filter(s => s.classses === className && s.id)
+            .map(s => s.id!)
+
+          if (groupStudents.length === 0) {
+            console.log(`${getTimestamp()} Skipping class ${className} - no students with IDs`)
+            continue
+          }
+
+          // Check if class already exists
+          const existingGroupId = existingClasses.get(className.toLowerCase())
+
+          if (existingGroupId) {
+            // Add students to existing group
+            console.log(`${getTimestamp()} Adding ${groupStudents.length} students to existing class ${className}`)
+            await retryWithBackoff(
+              () => this.adminClient!.put('/manage/User/Group/Set', {
+                groupId: existingGroupId,
+                userIds: groupStudents
+              }),
+              { context: `Add students to group ${className}`, maxRetries: 5 }
+            )
+
+            // Also add new teachers to the existing class if any
+            const combinedTeachers = [...allTeachers]
+            successfulUsers.forEach(u => {
+              const existingIdx = combinedTeachers.findIndex(t => t.username === u.username || t.actualUserName === u.actualUserName)
+              if (existingIdx >= 0) {
+                combinedTeachers[existingIdx] = { ...combinedTeachers[existingIdx], ...u }
+              }
+            })
+
+            // Find teachers that belong to this class
+            const newTeachers = combinedTeachers
+              .filter(t => {
+                if (!t.id) return false
+                // Check if this teacher was in the retry list (newly succeeded)
+                const wasRetried = successfulUsers.some(u =>
+                  u.username === t.username || u.actualUserName === t.actualUserName
+                )
+                if (!wasRetried) return false
+
+                const isAdminTeacher = t.classses?.toUpperCase() === schoolPrefix.toUpperCase()
+                if (isAdminTeacher) return true
+                return t.classses?.toLowerCase() === className.toLowerCase() ||
+                  className.toLowerCase().startsWith(t.classses?.toLowerCase() || '')
+              })
+              .map(t => t.id!)
+
+            if (newTeachers.length > 0) {
+              console.log(`${getTimestamp()} Adding ${newTeachers.length} teachers to existing class ${className}`)
+              try {
+                // Add teachers to the class using the class update API
+                await retryWithBackoff(
+                  () => this.adminClient!.put('/manage/classes/teachers', {
+                    groupId: existingGroupId,
+                    teacherIds: newTeachers
+                  }),
+                  { context: `Add teachers to class ${className}`, maxRetries: 3 }
+                )
+                console.log(`${getTimestamp()} ✅ Added ${newTeachers.length} teachers to class ${className}`)
+              } catch (teacherError: any) {
+                console.error(`${getTimestamp()} ⚠ Could not add teachers to existing class (API may not support this):`, teacherError.message)
+              }
+            }
+
+            console.log(`${getTimestamp()} ✅ Added students to existing class ${className}`)
+          } else {
+            // Create new group and class
+            console.log(`${getTimestamp()} Creating new class: ${className}`)
+
+            const createGroupResponse = await retryWithBackoff(
+              () => this.adminClient!.post<SaveUserGroupResult>('/manage/user/group', {
+                name: className,
+                users: groupStudents
+              }),
+              { context: `Create group ${className}`, maxRetries: 5 }
+            )
+
+            const groupId = createGroupResponse.data.userGroup.id
+
+            // Find teachers for this class
+            const combinedTeachers = [...allTeachers]
+            successfulUsers.forEach(u => {
+              const existingIdx = combinedTeachers.findIndex(t => t.username === u.username || t.actualUserName === u.actualUserName)
+              if (existingIdx >= 0) {
+                combinedTeachers[existingIdx] = { ...combinedTeachers[existingIdx], ...u }
+              }
+            })
+
+            const classTeachers = combinedTeachers
+              .filter(t => {
+                if (!t.id) return false
+                const isAdminTeacher = t.classses.toUpperCase() === schoolPrefix.toUpperCase()
+                if (isAdminTeacher) return true
+                return t.classses.toLowerCase() === className.toLowerCase() ||
+                  className.toLowerCase().startsWith(t.classses.toLowerCase())
+              })
+              .map(t => t.id!)
+
+            // Add existing admin teacher if available
+            if (existingAdminTeacherId && !classTeachers.includes(existingAdminTeacherId)) {
+              classTeachers.push(existingAdminTeacherId)
+            }
+
+            // Create the class
+            await retryWithBackoff(
+              () => this.adminClient!.post('/manage/classes', {
+                name: className,
+                description: className,
+                startDate: '2025-01-01T00:00:00.000Z',
+                endDate: '2026-04-01T00:00:00.000Z',
+                targetGroups: [groupId],
+                teachers: classTeachers,
+                grades: classItem.grade ? [classItem.grade] : []
+              }),
+              { context: `Create class ${className}`, maxRetries: 5 }
+            )
+
+            console.log(`${getTimestamp()} ✅ Created class ${className} with ${groupStudents.length} students, ${classTeachers.length} teachers`)
+          }
+
+          // Mark all users in this class as addedToClass
+          usersNeedingClassAssignment
+            .filter(u => u.classses === className)
+            .forEach(u => {
+              u.state = { ...u.state, addedToClass: true }
+            })
+
+        } catch (error: any) {
+          console.error(`${getTimestamp()} ❌ Failed to process class ${className}:`, error.message)
+          // Don't fail the entire retry, just log the error
+        }
+      }
+
+      console.log(`${getTimestamp()} Phase 4 complete`)
+    } else if (usersNeedingClassAssignment.length === 0 && successfulUsers.length > 0) {
+      console.log(`\n${getTimestamp()} Phase 4: Skip (all users already added to class)`)
+    }
+
+    // ===== PHASE 5: ASSIGN TEACHER ROLE =====
+    // Find all successful teachers that haven't been assigned role yet
+    const successfulTeachers = successfulUsers.filter(u => {
+      // Skip if already assigned role
+      if (u.state?.roleAssigned) return false
+
+      // Check if this user is a teacher by comparing with allTeachers
+      if (options?.allTeachers) {
+        return options.allTeachers.some(t =>
+          t.username === u.username || t.actualUserName === u.actualUserName
+        )
+      }
+      // Fallback: check if classses matches schoolPrefix (admin teacher pattern)
+      if (options?.schoolPrefix && u.classses?.toUpperCase() === options.schoolPrefix.toUpperCase()) {
+        return true
+      }
+      return false
+    })
+
+    if (successfulTeachers.length > 0) {
+      console.log(`\n${getTimestamp()} ========== PHASE 5: ASSIGN TEACHER ROLE ==========`)
+      console.log(`${getTimestamp()} Found ${successfulTeachers.length} teachers needing role assignment`)
+
+      const teacherIds = successfulTeachers
+        .filter(t => t.id)
+        .map(t => t.id!)
+
+      if (teacherIds.length > 0) {
+        try {
+          const roleSuccess = await this.assignTeachersToRole(teacherIds)
+          if (roleSuccess) {
+            console.log(`${getTimestamp()} ✅ Successfully assigned ${teacherIds.length} teachers to Teacher role`)
+            // Mark all teachers as roleAssigned
+            successfulTeachers.forEach(t => {
+              t.state = { ...t.state, roleAssigned: true }
+            })
+          } else {
+            console.error(`${getTimestamp()} ❌ Failed to assign teachers to role`)
+          }
+        } catch (error: any) {
+          console.error(`${getTimestamp()} ❌ Error assigning teachers to role:`, error.message)
+        }
+      }
+
+      console.log(`${getTimestamp()} Phase 5 complete`)
+    } else {
+      const alreadyAssigned = successfulUsers.filter(u => u.state?.roleAssigned).length
+      if (alreadyAssigned > 0) {
+        console.log(`\n${getTimestamp()} Phase 5: Skip (${alreadyAssigned} teachers already have role assigned)`)
+      }
+    }
 
     return { successfulUsers, stillFailedUsers }
   }

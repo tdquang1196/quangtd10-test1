@@ -48,11 +48,12 @@ export async function getAllPosts(pageId: string, accessToken: string): Promise<
 }
 
 /**
- * Get all videos/reels from a page
+ * Get all videos/reels from a page (includes privacy info)
  */
 export async function getAllVideos(pageId: string, accessToken: string): Promise<FBPost[]> {
     const allVideos: FBPost[] = [];
-    let nextUrl: string | null = `${BASE_URL}/${pageId}/videos?fields=id,description,created_time&limit=25&access_token=${accessToken}`;
+    // Added privacy field to detect Only Me videos
+    let nextUrl: string | null = `${BASE_URL}/${pageId}/videos?fields=id,description,created_time,privacy&limit=25&access_token=${accessToken}`;
 
     while (nextUrl) {
         try {
@@ -67,6 +68,7 @@ export async function getAllVideos(pageId: string, accessToken: string): Promise
                 id: v.id,
                 message: v.description,
                 created_time: v.created_time,
+                privacy: v.privacy, // Thêm privacy
             }));
 
             allVideos.push(...videos);
@@ -108,17 +110,23 @@ export async function getAllContent(pageId: string, accessToken: string): Promis
 /**
  * Get page's comments on a post (with full pagination)
  * Uses filter=toplevel to get only top-level comments (not replies)
+ * @param afterTime - Optional ISO timestamp to filter comments created after this time
  */
 export async function getPageCommentsOnPost(
     postId: string,
     pageId: string,
-    accessToken: string
+    accessToken: string,
+    afterTime?: string
 ): Promise<string[]> {
     const comments: string[] = [];
     // filter=toplevel gets only top-level comments (not replies)
-    let nextUrl: string | null = `${BASE_URL}/${postId}/comments?fields=id,message,from&filter=toplevel&limit=200&access_token=${accessToken}`;
+    // Include created_time field for filtering
+    let nextUrl: string | null = `${BASE_URL}/${postId}/comments?fields=id,message,from,created_time&filter=toplevel&limit=200&access_token=${accessToken}`;
     let pageCount = 0;
     const maxPages = 20; // Safety limit to prevent infinite loops
+    const afterTimeMs = afterTime ? new Date(afterTime).getTime() : null;
+
+    console.log(`[getPageCommentsOnPost] Fetching comments for post ${postId}, afterTime: ${afterTime || 'none'}`);
 
     while (nextUrl && pageCount < maxPages) {
         try {
@@ -131,9 +139,19 @@ export async function getPageCommentsOnPost(
             }
 
             // Filter to only page's comments
-            const pageComments = data.data
-                .filter((c: any) => c.from?.id === pageId)
-                .map((c: any) => c.message);
+            let filteredComments = data.data.filter((c: any) => c.from?.id === pageId);
+
+            // If afterTime is specified, filter comments created after that time
+            if (afterTimeMs) {
+                const beforeFilter = filteredComments.length;
+                filteredComments = filteredComments.filter((c: any) => {
+                    const commentTime = new Date(c.created_time).getTime();
+                    return commentTime > afterTimeMs;
+                });
+                console.log(`[getPageCommentsOnPost] Page ${pageCount + 1}: Filtered ${beforeFilter} -> ${filteredComments.length} comments (by time)`);
+            }
+
+            const pageComments = filteredComments.map((c: any) => c.message);
 
             comments.push(...pageComments);
             nextUrl = data.paging?.next || null;

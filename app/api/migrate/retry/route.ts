@@ -19,12 +19,19 @@ interface UserData {
         loggedIn?: boolean
         equipmentSet?: boolean
         phoneUpdated?: boolean
+        addedToClass?: boolean
+        roleAssigned?: boolean
     }
     retryCount?: number
 }
 
 interface RetryRequest {
     failedUsers: UserData[]
+    // Optional: for group/class assignment in batch mode
+    schoolPrefix?: string
+    classes?: UserData[]
+    allStudents?: UserData[]
+    allTeachers?: UserData[]
 }
 
 export async function POST(request: NextRequest) {
@@ -71,6 +78,10 @@ export async function POST(request: NextRequest) {
 
         console.log('Starting retry for failed users...')
         console.log(`Failed users to retry: ${body.failedUsers.length}`)
+        if (body.schoolPrefix) {
+            console.log(`School prefix: ${body.schoolPrefix}`)
+            console.log(`Classes: ${body.classes?.length || 0}`)
+        }
 
         // Log state of each user
         body.failedUsers.forEach((user, idx) => {
@@ -78,8 +89,16 @@ export async function POST(request: NextRequest) {
             console.log(`[${idx + 1}] ${user.username}: registered=${state.registered}, loggedIn=${state.loggedIn}, actualUserName=${user.actualUserName || 'N/A'}`)
         })
 
-        // Execute retry
-        const result = await migrationService.retryUsers(body.failedUsers)
+        // Build options for group/class assignment
+        const retryOptions = body.schoolPrefix ? {
+            schoolPrefix: body.schoolPrefix,
+            classes: body.classes,
+            allStudents: body.allStudents,
+            allTeachers: body.allTeachers
+        } : undefined
+
+        // Execute retry with options
+        const result = await migrationService.retryUsers(body.failedUsers, retryOptions)
 
         console.log('Retry completed')
         console.log(`Success: ${result.successfulUsers.length}`)

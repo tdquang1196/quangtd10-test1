@@ -36,6 +36,8 @@ export default function FBAutoCommentPage() {
         lastScanAt: string | null;
         lastProcessedPostTime: string | null;
         totalPostsProcessed: number;
+        // Option 3: Lưu tracking để persist qua server restart
+        commentTracking?: Record<string, string[]>;
     } | null>(null);
     const [isProcessRunning, setIsProcessRunning] = useState(false);
 
@@ -776,11 +778,14 @@ export default function FBAutoCommentPage() {
                                     </span>
                                 </label>
                             </div>
-                            {scanState && scanState.lastScanAt && (
+                            {scanState && (scanState.lastScanAt || scanState.lastProcessedPostTime) && (
                                 <div className="text-xs text-blue-600 bg-blue-100 rounded px-2 py-1 inline-block">
-                                    📊 Lần quét cuối: {new Date(scanState.lastScanAt).toLocaleString('vi-VN')}
+                                    📊 Lần quét cuối: {new Date(scanState.lastScanAt || scanState.lastProcessedPostTime!).toLocaleString('vi-VN')}
                                     {scanState.totalPostsProcessed > 0 && (
                                         <span> • Đã xử lý {scanState.totalPostsProcessed} posts</span>
+                                    )}
+                                    {scanState.commentTracking && Object.keys(scanState.commentTracking).length > 0 && (
+                                        <span> • 💾 Tracking {Object.keys(scanState.commentTracking).length} posts</span>
                                     )}
                                 </div>
                             )}
@@ -809,6 +814,24 @@ export default function FBAutoCommentPage() {
                                 className="px-6 py-3 bg-white hover:bg-gray-50 text-gray-700 rounded-xl font-semibold border border-gray-200 shadow-sm hover:shadow transition-all duration-200"
                             >
                                 🗑️ Xóa logs
+                            </button>
+                            <button
+                                onClick={() => {
+                                    const content = logs.map(log =>
+                                        `[${new Date(log.timestamp).toLocaleString('vi-VN')}] [${log.type.toUpperCase()}] ${log.message}`
+                                    ).join('\n');
+                                    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `fb-auto-comment-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                }}
+                                disabled={logs.length === 0}
+                                className="px-6 py-3 bg-white hover:bg-gray-50 text-gray-700 rounded-xl font-semibold border border-gray-200 shadow-sm hover:shadow transition-all duration-200 disabled:opacity-50"
+                            >
+                                📥 Export Logs ({logs.length})
                             </button>
                             {isProcessRunning && (
                                 <span className="flex items-center gap-2 px-4 py-2 bg-amber-100 text-amber-700 rounded-lg text-sm font-medium">
@@ -987,11 +1010,11 @@ export default function FBAutoCommentPage() {
                         )}
 
                         {/* Logs */}
-                        <div className="bg-slate-800 rounded-xl p-4 h-96 overflow-y-auto font-mono text-sm border border-slate-700">
+                        <div className="bg-slate-800 rounded-xl p-4 h-[600px] overflow-y-auto font-mono text-sm border border-slate-700">
                             {logs.length === 0 ? (
                                 <div className="text-slate-400 text-center py-4">📋 Chưa có logs</div>
                             ) : (
-                                logs.slice(-100).reverse().map((log, index) => (
+                                [...logs].reverse().map((log, index) => (
                                     <div
                                         key={index}
                                         className={`py-1.5 px-2 rounded mb-1 ${log.type === 'success' ? 'text-emerald-300 bg-emerald-500/10' :

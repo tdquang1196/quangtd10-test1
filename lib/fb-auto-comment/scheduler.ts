@@ -25,7 +25,7 @@ let isProcessRunning = false;
 
 // In-memory logs (temporary, for current session)
 let logsStore: LogEntry[] = [];
-const MAX_LOGS = 200;
+const MAX_LOGS = 500;
 
 interface LogEntry {
     timestamp: string;
@@ -236,11 +236,13 @@ function markAsCommented(postId: string, message: string): void {
 }
 
 /**
- * Scan state structure
+ * Scan state structure - bao gồm tracking để lưu vào client localStorage
  */
 interface ScanStateData {
     lastProcessedPostTime: string | null;
     totalPostsProcessed: number;
+    // Option 3: Lưu tracking vào client để persist qua server restart
+    commentTracking?: Record<string, string[]>; // postId -> list of comment prefixes (10 words)
 }
 
 /**
@@ -289,8 +291,22 @@ export async function runAutoComment(
     if (scanMode === 'full') {
         addLog('info', `🔄 CHẾ ĐỘ: Quét toàn bộ từ đầu`);
         commentedPosts.clear();
-        currentScanState = { lastProcessedPostTime: null, totalPostsProcessed: 0 };
+        currentScanState = { lastProcessedPostTime: null, totalPostsProcessed: 0, commentTracking: {} };
     } else {
+        // Option 3: Restore tracking từ client localStorage
+        if (currentScanState.commentTracking) {
+            const trackingCount = Object.keys(currentScanState.commentTracking).length;
+            if (trackingCount > 0) {
+                addLog('info', `📥 Đã restore tracking từ client: ${trackingCount} posts`);
+                // Merge client tracking vào in-memory tracking
+                for (const [postId, prefixes] of Object.entries(currentScanState.commentTracking)) {
+                    const existing = commentedPosts.get(postId) || [];
+                    const merged = [...new Set([...existing, ...prefixes])];
+                    commentedPosts.set(postId, merged);
+                }
+            }
+        }
+
         if (currentScanState.lastProcessedPostTime) {
             addLog('info', `⏩ CHẾ ĐỘ: Quét tiếp từ ${new Date(currentScanState.lastProcessedPostTime).toLocaleString('vi-VN')}`);
         } else {
@@ -344,19 +360,13 @@ export async function runAutoComment(
                 ? post.message.substring(0, 50) + (post.message.length > 50 ? '...' : '')
                 : '(Không có nội dung)';
 
-            addLog('info', `📄 [Post ${postIndex + 1}/${allContent.length}] ${postPreview}`);
+            addLog('info', `📄 [${postIndex + 1}/${allContent.length}] [Post ${post.id}] ${postPreview}`);
 
-            // Check if post is already in private posts list (skip to avoid API spam)
-            if (isPrivatePost(post.id)) {
-                addLog('warning', `🔒 [SKIP] Post đang ở chế độ riêng tư - đã được đánh dấu trước đó`);
-                continue;
-            }
-
-            // Check if post privacy is "Only Me" (SELF)
+            // Check if post privacy is "Only Me" (SELF) - skip tạm thời, lần sau sẽ check lại
             const privacyValue = post.privacy?.value || 'UNKNOWN';
             if (privacyValue === 'SELF') {
-                addLog('warning', `🔒 [SKIP] Post để chế độ "Only Me" - không thể comment`);
-                addPrivatePost(post.id, postPreview, privacyValue);
+                addLog('warning', `🔒 [SKIP TẠM] Post để chế độ "Only Me" - bỏ qua lần này, sẽ check lại lần sau`);
+                // Không lưu vào privatePostsStore - để lần sau check lại phòng user mở lại
                 continue;
             }
 
@@ -388,33 +398,52 @@ export async function runAutoComment(
                 }
 
                 // Check duplicate using BOTH in-memory tracking AND direct comparison with existingComments
-                const alreadyExists = isAlreadyCommented(post.id, commentText) ||
-                    existingComments.some(ec => getFirstNWords(ec, 10) === getFirstNWords(commentText, 10));
+                const inMemoryCheck = isAlreadyCommented(post.id, commentText);
+                const directCheck = existingComments.some(ec => getFirstNWords(ec, 10) === getFirstNWords(commentText, 10));
+                const alreadyExists = inMemoryCheck || directCheck;
 
                 if (alreadyExists) {
                     result.commentsSkipped++;
-                    addLog('warning', `⏭️ [Comment ${cmtIndex + 1}] Đã có, bỏ qua: "${commentPreview}"`);
+                    addLog('warning', `⏭️ [Post ${post.id}] [Comment ${cmtIndex + 1}] Đã có, bỏ qua: "${commentPreview}"`);
                     continue;
                 }
 
+                // ===== Option 2: Double-check ngay trước khi post =====
+                // Fetch lại comments mới nhất từ Facebook để đảm bảo không bị trùng
+                const freshComments = await getPageCommentsOnPost(
+                    post.id,
+                    config.pageId,
+                    config.accessToken
+                );
+                const freshCheck = freshComments.some(fc => getFirstNWords(fc, 10) === getFirstNWords(commentText, 10));
+                if (freshCheck) {
+                    result.commentsSkipped++;
+                    addLog('warning', `⏭️ [Post ${post.id}] [Double-check] Comment đã có trên Facebook: "${commentPreview}"`);
+                    // Sync lại vào tracking
+                    markAsCommented(post.id, commentText);
+                    continue;
+                }
+                // ===== END Option 2 =====
+
                 // Post comment
-                addLog('info', `💬 [Comment ${cmtIndex + 1}/${comments.length}] Đang post: "${commentPreview}"`);
+                addLog('info', `💬 [Post ${post.id}] [Comment ${cmtIndex + 1}/${comments.length}] Đang post: "${commentPreview}"`);
+
                 const commentResult = await postComment(post.id, commentText, config.accessToken);
 
                 if (commentResult.id) {
                     markAsCommented(post.id, commentText);
                     result.commentsPosted++;
-                    addLog('success', `✅ Thành công! Post ${postIndex + 1}, Comment ${cmtIndex + 1}`);
+                    addLog('success', `✅ [Post ${post.id}] Thành công! Comment ${cmtIndex + 1}`);
 
                     // Remove from private posts if it was there (privacy might have changed)
                     removePrivatePost(post.id);
 
-                    // Only delay after successful comment
-                    addLog('info', `⏳ Đợi ${config.delayBetweenComments}s...`);
+                    // Option 1: Delay để Facebook API sync
+                    addLog('info', `⏳ Đợi ${config.delayBetweenComments}s để Facebook sync...`);
                     await new Promise(r => setTimeout(r, config.delayBetweenComments * 1000));
                 } else {
                     const errorMsg = commentResult.error || 'Unknown error';
-                    addLog('error', `❌ Lỗi post comment vào Post ${postIndex + 1}: ${errorMsg}`);
+                    addLog('error', `❌ [Post ${post.id}] Lỗi post comment: ${errorMsg}`);
 
                     // Track failed post
                     addFailedPost(post.id, postPreview, errorMsg);
@@ -435,6 +464,14 @@ export async function runAutoComment(
             // Update scan state
             currentScanState.lastProcessedPostTime = post.created_time;
             currentScanState.totalPostsProcessed++;
+
+            // Option 3: Export tracking để client lưu vào localStorage
+            currentScanState.commentTracking = {};
+            commentedPosts.forEach((prefixes, postId) => {
+                // Chỉ lưu prefix (10 words) để tiết kiệm dung lượng
+                currentScanState.commentTracking![postId] = prefixes.map(p => getFirstNWords(p, 10));
+            });
+
             result.scanState = { ...currentScanState };
         }
 
@@ -447,6 +484,13 @@ export async function runAutoComment(
     } finally {
         isProcessRunning = false;
         abortFlag = false;
+
+        // Option 3: Luôn export tracking mới nhất
+        currentScanState.commentTracking = {};
+        commentedPosts.forEach((prefixes, postId) => {
+            currentScanState.commentTracking![postId] = prefixes.map(p => getFirstNWords(p, 10));
+        });
+
         result.scanState = { ...currentScanState };
     }
 

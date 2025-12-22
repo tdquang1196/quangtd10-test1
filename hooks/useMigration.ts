@@ -1028,7 +1028,12 @@ export const useMigration = () => {
 
       const token = localStorage.getItem('auth_token')
       const response = await axios.post('/api/migrate/retry', {
-        failedUsers: failedUsersWithState
+        failedUsers: failedUsersWithState,
+        // Include context for group/class assignment
+        schoolPrefix: schoolPrefix,
+        classes: result.ListDataClasses || [],
+        allStudents: result.ListDataStudent || [],
+        allTeachers: result.ListDataTeacher || []
       }, {
         headers: {
           Authorization: `Bearer ${token}`
@@ -1042,12 +1047,24 @@ export const useMigration = () => {
       const updatedTeachers = [...result.ListDataTeacher]
       const updatedErrors = [...result.ListUserError]
 
+      // Helper function to match users by multiple fields
+      const matchUser = (a: any, b: any) => {
+        // Compare by id if both have id
+        if (a.id && b.id && a.id === b.id) return true
+        // Compare by actualUserName (the final username after registration)
+        if (a.actualUserName && b.actualUserName && a.actualUserName === b.actualUserName) return true
+        // Compare by original username
+        if (a.username && b.username && a.username === b.username) return true
+        // Cross compare username and actualUserName
+        if (a.username && b.actualUserName && a.username === b.actualUserName) return true
+        if (a.actualUserName && b.username && a.actualUserName === b.username) return true
+        return false
+      }
+
       // Update successful retries - REPLACE existing entries, don't add duplicates
       retryResult.successfulUsers?.forEach((user: any) => {
         // Check if this is a student
-        const studentIndex = updatedStudents.findIndex((s: any) =>
-          s.username === user.username || s.actualUserName === user.actualUserName
-        )
+        const studentIndex = updatedStudents.findIndex((s: any) => matchUser(s, user))
         if (studentIndex >= 0) {
           // Replace with the updated user data
           updatedStudents[studentIndex] = {
@@ -1057,9 +1074,7 @@ export const useMigration = () => {
         }
 
         // Check if this is a teacher
-        const teacherIndex = updatedTeachers.findIndex((t: any) =>
-          t.username === user.username || t.actualUserName === user.actualUserName
-        )
+        const teacherIndex = updatedTeachers.findIndex((t: any) => matchUser(t, user))
         if (teacherIndex >= 0) {
           // Replace with the updated user data
           updatedTeachers[teacherIndex] = {
@@ -1069,9 +1084,7 @@ export const useMigration = () => {
         }
 
         // Remove from errors if successful
-        const errorIndex = updatedErrors.findIndex((e: any) =>
-          e.username === user.username || e.actualUserName === user.actualUserName
-        )
+        const errorIndex = updatedErrors.findIndex((e: any) => matchUser(e, user))
         if (errorIndex >= 0) {
           updatedErrors.splice(errorIndex, 1)
         }
@@ -1079,9 +1092,7 @@ export const useMigration = () => {
 
       // Update still failed users with new state/reason
       retryResult.stillFailedUsers?.forEach((user: any) => {
-        const errorIndex = updatedErrors.findIndex((e: any) =>
-          e.username === user.username || e.actualUserName === user.actualUserName
-        )
+        const errorIndex = updatedErrors.findIndex((e: any) => matchUser(e, user))
         if (errorIndex >= 0) {
           // Update existing error with new state and reason
           updatedErrors[errorIndex] = {
@@ -1103,13 +1114,13 @@ export const useMigration = () => {
 
       // Update created/failed users for UI
       const allCreated = [
-        ...updatedStudents.filter((s: any) => s.id && !updatedErrors.find((e: any) => e.username === s.username)),
-        ...updatedTeachers.filter((t: any) => t.id && !updatedErrors.find((e: any) => e.username === t.username))
+        ...updatedStudents.filter((s: any) => s.id && !updatedErrors.find((e: any) => matchUser(e, s))),
+        ...updatedTeachers.filter((t: any) => t.id && !updatedErrors.find((e: any) => matchUser(e, t)))
       ]
       setCreatedUsers(allCreated)
 
       const allFailed = updatedErrors.map((u: any) => ({
-        user: { username: u.username, displayName: u.displayName },
+        user: { username: u.actualUserName || u.username, displayName: u.actualDisplayName || u.displayName },
         error: u.reason || 'Failed to create user'
       }))
       setFailedUsers(allFailed)
@@ -1345,7 +1356,12 @@ export const useMigration = () => {
 
       const token = localStorage.getItem('auth_token')
       const response = await axios.post('/api/migrate/retry', {
-        failedUsers: failedUsersWithState
+        failedUsers: failedUsersWithState,
+        // Include context for group/class assignment in batch mode
+        schoolPrefix: school.schoolPrefix,
+        classes: school.classes || [],
+        allStudents: school.students || [],
+        allTeachers: school.teachers || []
       }, {
         headers: {
           Authorization: `Bearer ${token}`
@@ -1359,12 +1375,24 @@ export const useMigration = () => {
       const updatedTeachers = [...school.teachers]
       const updatedErrors = [...school.failedUsers]
 
+      // Helper function to match users by multiple fields
+      const matchUser = (a: any, b: any) => {
+        // Compare by id if both have id
+        if (a.id && b.id && a.id === b.id) return true
+        // Compare by actualUserName (the final username after registration)
+        if (a.actualUserName && b.actualUserName && a.actualUserName === b.actualUserName) return true
+        // Compare by original username
+        if (a.username && b.username && a.username === b.username) return true
+        // Cross compare username and actualUserName
+        if (a.username && b.actualUserName && a.username === b.actualUserName) return true
+        if (a.actualUserName && b.username && a.actualUserName === b.username) return true
+        return false
+      }
+
       // Update successful retries - REPLACE existing entries
       retryResult.successfulUsers?.forEach((user: any) => {
         // Check if this is a student
-        const studentIndex = updatedStudents.findIndex((s: any) =>
-          s.username === user.username || s.actualUserName === user.actualUserName
-        )
+        const studentIndex = updatedStudents.findIndex((s: any) => matchUser(s, user))
         if (studentIndex >= 0) {
           updatedStudents[studentIndex] = {
             ...updatedStudents[studentIndex],
@@ -1373,9 +1401,7 @@ export const useMigration = () => {
         }
 
         // Check if this is a teacher
-        const teacherIndex = updatedTeachers.findIndex((t: any) =>
-          t.username === user.username || t.actualUserName === user.actualUserName
-        )
+        const teacherIndex = updatedTeachers.findIndex((t: any) => matchUser(t, user))
         if (teacherIndex >= 0) {
           updatedTeachers[teacherIndex] = {
             ...updatedTeachers[teacherIndex],
@@ -1384,9 +1410,7 @@ export const useMigration = () => {
         }
 
         // Remove from errors if successful
-        const errorIndex = updatedErrors.findIndex((e: any) =>
-          e.username === user.username || e.actualUserName === user.actualUserName
-        )
+        const errorIndex = updatedErrors.findIndex((e: any) => matchUser(e, user))
         if (errorIndex >= 0) {
           updatedErrors.splice(errorIndex, 1)
         }
@@ -1394,9 +1418,7 @@ export const useMigration = () => {
 
       // Update still failed users with new state/reason
       retryResult.stillFailedUsers?.forEach((user: any) => {
-        const errorIndex = updatedErrors.findIndex((e: any) =>
-          e.username === user.username || e.actualUserName === user.actualUserName
-        )
+        const errorIndex = updatedErrors.findIndex((e: any) => matchUser(e, user))
         if (errorIndex >= 0) {
           updatedErrors[errorIndex] = {
             ...updatedErrors[errorIndex],
