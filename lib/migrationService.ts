@@ -104,13 +104,16 @@ interface SaveRoleResult {
   id?: string
 }
 
-const MIN_LENGTH_DISPLAY_NAME = 2
-const MAX_LENGTH_DISPLAY_NAME = 20
-
-// Rate limiting configuration
-const REGISTER_RATE = 2 // 2 requests/second for register API
-const LOGIN_RATE = 2 // 2 requests/second for login API
-const MAX_CONCURRENT_GROUPS = 2 // Maximum number of display name groups to process in parallel
+// Import constants from separate file
+import {
+  MIN_LENGTH_DISPLAY_NAME,
+  MAX_LENGTH_DISPLAY_NAME,
+  REGISTER_RATE,
+  LOGIN_RATE,
+  MAX_CONCURRENT_GROUPS,
+  DEFAULT_CLASS_START_DATE,
+  DEFAULT_CLASS_END_DATE
+} from './migrationConstants'
 
 /**
  * Throttled dispatcher for rate-limited parallel request dispatching.
@@ -1370,8 +1373,8 @@ export class MigrationService {
             () => this.adminClient!.post('/manage/classes', {
               name: classItem.username,
               description: classItem.username,
-              startDate: '2025-01-01T00:00:00.000Z',
-              endDate: '2026-04-01T00:00:00.000Z',
+              startDate: DEFAULT_CLASS_START_DATE,
+              endDate: DEFAULT_CLASS_END_DATE,
               targetGroups: [groupId],
               teachers: classTeachers,
               grades: classItem.grade ? [classItem.grade] : []
@@ -1789,8 +1792,8 @@ export class MigrationService {
               () => this.adminClient!.post('/manage/classes', {
                 name: className,
                 description: className,
-                startDate: '2025-01-01T00:00:00.000Z',
-                endDate: '2026-04-01T00:00:00.000Z',
+                startDate: DEFAULT_CLASS_START_DATE,
+                endDate: DEFAULT_CLASS_END_DATE,
                 targetGroups: [groupId],
                 teachers: classTeachers,
                 grades: classItem.grade ? [classItem.grade] : []
