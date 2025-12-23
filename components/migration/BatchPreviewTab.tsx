@@ -54,36 +54,47 @@ export default function BatchPreviewTab({ schools, onBack, onCreate, isCreating 
             </Card>
 
             {/* Global Warning Banner */}
-            {totalWarnings > 0 && (
-                <Card className="p-5 bg-red-50 border-2 border-red-200">
-                    <div className="flex gap-3">
-                        <div className="flex-shrink-0">
-                            <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                        </div>
-                        <div className="flex-1">
-                            <h3 className="font-bold text-red-900 mb-2">
-                                ⚠️ {totalWarnings} Students Have Issues
-                            </h3>
-                            <p className="text-sm text-red-800 mb-2">
-                                Please fix these in your Excel files before uploading. Issues include special characters in names or invalid grade formats.
-                            </p>
-                            <div className="text-sm text-red-700">
-                                {schools.map(school => {
-                                    const schoolWarnings = school.students.filter((s: any) => s.warning).length
-                                    if (schoolWarnings === 0) return null
-                                    return (
-                                        <span key={school.schoolPrefix} className="mr-3">
-                                            <strong>{school.schoolPrefix}:</strong> {schoolWarnings} warnings
-                                        </span>
-                                    )
-                                })}
+            {totalWarnings > 0 && (() => {
+                const allStudentsWithWarnings = schools.flatMap(s => s.students.filter((st: any) => st.warning));
+                const ageWarnings = allStudentsWithWarnings.filter((s: any) => s.warning?.includes('Age') && s.warning?.includes('>= 16'));
+                const otherWarnings = allStudentsWithWarnings.filter((s: any) => !s.warning?.includes('Age') || !s.warning?.includes('>= 16'));
+
+                return (
+                    <Card className="p-5 bg-red-50 border-2 border-red-200">
+                        <div className="flex gap-3">
+                            <div className="flex-shrink-0">
+                                <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            <div className="flex-1">
+                                <h3 className="font-bold text-red-900 mb-2">
+                                    ⚠️ {totalWarnings} Students Have Issues
+                                </h3>
+                                <div className="text-sm text-red-800 mb-2 space-y-1">
+                                    {ageWarnings.length > 0 && (
+                                        <p>🎂 <strong>{ageWarnings.length}</strong> students with age ≥ 16 (unusual for school migration)</p>
+                                    )}
+                                    {otherWarnings.length > 0 && (
+                                        <p>📝 <strong>{otherWarnings.length}</strong> students with name/format issues</p>
+                                    )}
+                                </div>
+                                <div className="text-sm text-red-700">
+                                    {schools.map(school => {
+                                        const schoolWarnings = school.students.filter((s: any) => s.warning).length
+                                        if (schoolWarnings === 0) return null
+                                        return (
+                                            <span key={school.schoolPrefix} className="mr-3">
+                                                <strong>{school.schoolPrefix}:</strong> {schoolWarnings} warnings
+                                            </span>
+                                        )
+                                    })}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </Card>
-            )}
+                    </Card>
+                );
+            })()}
 
             {/* Schools Preview */}
             <div className="space-y-4">
@@ -153,6 +164,14 @@ export default function BatchPreviewTab({ schools, onBack, onCreate, isCreating 
                                                 <span className="font-mono text-blue-600">{student.username}</span>
                                                 <span>{student.displayName}</span>
                                                 <span className="text-gray-500">({student.className})</span>
+                                                {student.age && (
+                                                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${student.age >= 16
+                                                        ? 'bg-orange-100 text-orange-700'
+                                                        : 'bg-blue-100 text-blue-700'
+                                                        }`}>
+                                                        {student.age} tuổi {student.age >= 16 && '⚠️'}
+                                                    </span>
+                                                )}
                                                 {student.warning && (
                                                     <span className="text-red-500 text-xs" title={student.warning}>⚠️</span>
                                                 )}

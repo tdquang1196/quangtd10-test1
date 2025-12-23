@@ -15,6 +15,7 @@ interface UserData {
   phoneNumber: string
   reason?: string
   grade?: number
+  age?: number // Calculated age from birth date (year-based)
   accessToken?: string // Store access token from registration to avoid re-login
   loginDisplayName?: string // Store login display name from Phase 1 for fallback in Phase 2
 
@@ -584,41 +585,44 @@ export class MigrationService {
       }
     }
   }
-
+  /**
+   * Set equipment, display name, age, and phone number in a single API call
+   * Matches backend: ChangeUserEquipmentCommand { Age, ListItem, DisplayName, PhoneNumber }
+   */
   private async setEquipmentAndProfile(
     client: AxiosInstance,
-    displayName: string
+    displayName: string,
+    age?: number,
+    phoneNumber?: string
   ): Promise<boolean> {
     try {
       // Get random equipment set (HEAD, UPPER_BODY, LOWER_BODY, FOOT)
       const listItem = getRandomEquipmentSet()
 
-      await client.post('/account/equipment', {
+      // Build request payload matching ChangeUserEquipmentCommand
+      const payload: Record<string, any> = {
         listItem: listItem,
         displayName: displayName
-      })
+      }
+
+      // Include age if provided (year-based: currentYear - birthYear)
+      if (age !== undefined && age !== null) {
+        payload.age = age
+      }
+
+      // Include phone number if provided (clean non-digit characters)
+      if (phoneNumber) {
+        const cleanPhone = phoneNumber.replace(/\D/g, '')
+        if (cleanPhone) {
+          payload.phoneNumber = cleanPhone
+        }
+      }
+
+      console.log(`[Equipment] Payload: age=${age}, phone=${phoneNumber ? 'yes' : 'no'}, displayName=${displayName}`)
+      await client.post('/account/equipment', payload)
       return true
     } catch (error) {
       console.error('Equipment assignment error:', error)
-      return false
-    }
-  }
-
-  private async updatePhoneNumber(
-    client: AxiosInstance,
-    phoneNumber: string
-  ): Promise<boolean> {
-    try {
-      if (!phoneNumber) return true
-
-      const cleanPhone = phoneNumber.replace(/\D/g, '')
-      if (!cleanPhone) return true
-
-      await client.put('/account/users/update-phone-number', {
-        phoneNumber: cleanPhone
-      })
-      return true
-    } catch (error) {
       return false
     }
   }
@@ -772,29 +776,17 @@ export class MigrationService {
     // Use validated display name or fallback to default display name
     user.actualDisplayName = validatedDisplayName || defaultDisplayName
 
-    // Set equipment and profile (continue even if this fails)
-    if (!user.state?.equipmentSet) {
+    // Set equipment, profile, age, and phone number in a single API call
+    // This combines equipmentSet and phoneUpdated into one step
+    if (!user.state?.equipmentSet || !user.state?.phoneUpdated) {
       try {
         await retryWithBackoff(
-          () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!),
-          { context: `Equipment ${user.actualUserName}`, maxRetries: 3 }
+          () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!, user.age, user.phoneNumber),
+          { context: `Equipment+Phone ${user.actualUserName}`, maxRetries: 3 }
         )
-        user.state = { ...user.state, equipmentSet: true }
+        user.state = { ...user.state, equipmentSet: true, phoneUpdated: true }
       } catch (error) {
-        console.error('Equipment setup failed after retries, continuing with phone number update:', error)
-      }
-    }
-
-    // Always update phone number (even if display name validation or equipment failed)
-    if (!user.state?.phoneUpdated && user.phoneNumber) {
-      try {
-        await retryWithBackoff(
-          () => this.updatePhoneNumber(userClient, user.phoneNumber),
-          { context: `Phone ${user.actualUserName}`, maxRetries: 3 }
-        )
-        user.state = { ...user.state, phoneUpdated: true }
-      } catch (error) {
-        console.error('Phone number update failed after retries:', error)
+        console.error('Equipment/Phone setup failed after retries:', error)
       }
     }
   }
@@ -1591,31 +1583,17 @@ export class MigrationService {
             user.actualDisplayName = validatedDisplayName || defaultDisplayName
           }
 
-          // Set equipment if not done
-          if (!user.state?.equipmentSet) {
+          // Set equipment, age, and phone in a single API call if not done
+          if (!user.state?.equipmentSet || !user.state?.phoneUpdated) {
             try {
               await retryWithBackoff(
-                () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!),
-                { context: `Equipment ${user.actualUserName}`, maxRetries: 3 }
+                () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!, user.age, user.phoneNumber),
+                { context: `Equipment+Phone ${user.actualUserName}`, maxRetries: 3 }
               )
-              user.state = { ...user.state, equipmentSet: true }
-              console.log(`${getTimestamp()} [${i + 1}] ✓ Equipment set`)
+              user.state = { ...user.state, equipmentSet: true, phoneUpdated: true }
+              console.log(`${getTimestamp()} [${i + 1}] ✓ Equipment+Phone set`)
             } catch (error) {
-              console.error(`${getTimestamp()} [${i + 1}] ⚠ Equipment setup failed, continuing...`)
-            }
-          }
-
-          // Update phone if not done
-          if (!user.state?.phoneUpdated && user.phoneNumber) {
-            try {
-              await retryWithBackoff(
-                () => this.updatePhoneNumber(userClient, user.phoneNumber),
-                { context: `Phone ${user.actualUserName}`, maxRetries: 3 }
-              )
-              user.state = { ...user.state, phoneUpdated: true }
-              console.log(`${getTimestamp()} [${i + 1}] ✓ Phone updated`)
-            } catch (error) {
-              console.error(`${getTimestamp()} [${i + 1}] ⚠ Phone update failed, continuing...`)
+              console.error(`${getTimestamp()} [${i + 1}] ⚠ Equipment/Phone setup failed, continuing...`)
             }
           }
         } else {

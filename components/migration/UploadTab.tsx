@@ -17,6 +17,7 @@ interface UploadTabProps {
     fullNameColumn: string
     gradeColumn: string
     phoneNumberColumn: string
+    birthDateColumn: string
     usernameColumn: string
     readAllSheets: boolean
     excludeLastSheet: boolean
@@ -32,6 +33,7 @@ interface UploadTabProps {
     fullNameColumn: string
     gradeColumn: string
     phoneNumberColumn: string
+    birthDateColumn: string
     usernameColumn: string
     readAllSheets: boolean
     excludeLastSheet: boolean
@@ -192,7 +194,7 @@ export default function UploadTab({
               </div>
 
               {/* Column Mapping */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-1">
                     Full Name Column <span className="text-red-600">*</span>
@@ -236,6 +238,21 @@ export default function UploadTab({
                     maxLength={3}
                   />
                   <p className="text-xs text-gray-500 mt-1">Column letter (optional)</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-900 mb-1">
+                    🎂 Birth Date Column
+                  </label>
+                  <input
+                    type="text"
+                    value={excelConfig.birthDateColumn}
+                    onChange={(e) => setExcelConfig({ ...excelConfig, birthDateColumn: e.target.value.toUpperCase() })}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:border-gray-900 focus:ring-1 focus:ring-gray-900 outline-none uppercase"
+                    placeholder="D"
+                    maxLength={3}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">For age calculation (optional)</p>
                 </div>
 
                 <div>

@@ -134,6 +134,45 @@ export function validateDisplayName(displayName: string): string | null {
 }
 
 /**
+ * Validate birthDate for parseable format and reasonable age
+ * Returns warning message if:
+ * - birth date can't be parsed or has invalid format
+ * - calculated age >= 16 (unusual for student migration)
+ * Allows: Valid date formats (DD-Mon-YY, D/M/YYYY, YYYY, etc.)
+ * NOT allowed: Random text, excessive special characters
+ */
+export function validateBirthDate(birthDate: string | number | Date | null | undefined): string | null {
+  if (birthDate === null || birthDate === undefined || birthDate === '') {
+    return null; // Empty is OK, birthDate is optional
+  }
+
+  // Try to parse the date
+  const parsed = parseBirthDate(birthDate);
+
+  if (parsed === null) {
+    // Could not parse - check for special characters or invalid format
+    const strValue = String(birthDate).trim();
+
+    // Check for problematic characters (excluding normal date separators)
+    const invalidChars = strValue.replace(/[\p{L}\p{N}\s\/\-\.]/gu, '');
+    if (invalidChars) {
+      const uniqueChars = [...new Set(invalidChars)].join(', ');
+      return `Invalid date chars: ${uniqueChars}`;
+    }
+
+    return `Cannot parse date: "${strValue}"`;
+  }
+
+  // Check if age >= 16 (unusual for student migration)
+  const age = calculateAge(parsed);
+  if (age !== null && age >= 16) {
+    return `Age ${age} >= 16`;
+  }
+
+  return null;
+}
+
+/**
  * Generate username from full name following the algorithm:
  * schoolPrefix + lastName + firstLettersOfOtherNames
  * Length: 6-20 characters
@@ -219,6 +258,197 @@ export function generatePassword(): string {
 }
 
 /**
+ * Month name mapping for parsing dates like "23-May-19"
+ */
+const MONTH_MAP: Record<string, number> = {
+  'jan': 0, 'january': 0,
+  'feb': 1, 'february': 1,
+  'mar': 2, 'march': 2,
+  'apr': 3, 'april': 3,
+  'may': 4,
+  'jun': 5, 'june': 5,
+  'jul': 6, 'july': 6,
+  'aug': 7, 'august': 7,
+  'sep': 8, 'september': 8,
+  'oct': 9, 'october': 9,
+  'nov': 10, 'november': 10,
+  'dec': 11, 'december': 11
+};
+
+/**
+ * Parse birth date from various formats commonly found in Vietnamese Excel files
+ * Supported formats:
+ * - DD-Mon-YY or D-Mon-YY (e.g., "23-May-19", "6-Apr-19")
+ * - DD/MM/YYYY or D/M/YYYY (e.g., "5/6/2015", "30/4/2015")
+ * - DD-MM-YYYY or D-M-YYYY
+ * - YYYY only (e.g., "2015", "2018")
+ * - Excel serial date number (e.g., 43608)
+ * - Date object (passed directly from Excel parser)
+ * 
+ * @param dateValue - The date value from Excel (can be string, number, or Date)
+ * @returns Parsed Date object, or null if parsing fails
+ */
+export function parseBirthDate(dateValue: string | number | Date | null | undefined): Date | null {
+  if (dateValue === null || dateValue === undefined || dateValue === '') {
+    return null;
+  }
+
+  // If already a Date object
+  if (dateValue instanceof Date) {
+    if (isNaN(dateValue.getTime())) return null;
+    return dateValue;
+  }
+
+  // Excel serial date (number) or year-only number
+  if (typeof dateValue === 'number') {
+    // Check if this looks like a year (4-digit number between 1900-2100)
+    // Excel might read "2015" as number 2015 instead of string "2015"
+    if (dateValue >= 1900 && dateValue <= 2100) {
+      // Treat as year - default to July 1st (middle of year)
+      return new Date(dateValue, 6, 1);
+    }
+
+    // Otherwise treat as Excel serial date: days since 1900-01-01
+    // Excel serial dates: 1 = 1900-01-01 (with Excel's leap year bug)
+    const excelEpoch = new Date(1899, 11, 30); // Dec 30, 1899
+    const resultDate = new Date(excelEpoch.getTime() + dateValue * 24 * 60 * 60 * 1000);
+
+    // Validate reasonable birth year (1900-2025)
+    if (resultDate.getFullYear() >= 1900 && resultDate.getFullYear() <= 2025) {
+      return resultDate;
+    }
+    return null;
+  }
+
+  // String value
+  const str = String(dateValue).trim();
+  if (!str) return null;
+
+  // Format 1: Year only (e.g., "2015", "2018")
+  if (/^\d{4}$/.test(str)) {
+    const year = parseInt(str, 10);
+    if (year >= 1900 && year <= 2025) {
+      // Default to July 1st (middle of year) for year-only dates
+      return new Date(year, 6, 1);
+    }
+    return null;
+  }
+
+  // Format 2: DD-Mon-YY or D-Mon-YY (e.g., "23-May-19", "6-Apr-19")
+  const monthNameMatch = str.match(/^(\d{1,2})[\/\-]([a-zA-Z]+)[\/\-](\d{2,4})$/);
+  if (monthNameMatch) {
+    const day = parseInt(monthNameMatch[1], 10);
+    const monthName = monthNameMatch[2].toLowerCase();
+    let year = parseInt(monthNameMatch[3], 10);
+
+    const month = MONTH_MAP[monthName];
+    if (month !== undefined && day >= 1 && day <= 31) {
+      // Handle 2-digit year
+      if (year < 100) {
+        // Assume 00-30 is 2000-2030, 31-99 is 1931-1999
+        year = year <= 30 ? 2000 + year : 1900 + year;
+      }
+      return new Date(year, month, day);
+    }
+  }
+
+  // Format 3: DD/MM/YYYY, D/M/YYYY, DD-MM-YYYY, D-M-YYYY
+  const numericMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (numericMatch) {
+    const day = parseInt(numericMatch[1], 10);
+    const month = parseInt(numericMatch[2], 10) - 1; // 0-indexed
+    let year = parseInt(numericMatch[3], 10);
+
+    // Handle 2-digit year
+    if (year < 100) {
+      year = year <= 30 ? 2000 + year : 1900 + year;
+    }
+
+    if (month >= 0 && month <= 11 && day >= 1 && day <= 31 && year >= 1900 && year <= 2025) {
+      return new Date(year, month, day);
+    }
+  }
+
+  // Format 4: YYYY/MM/DD or YYYY-MM-DD (ISO-like)
+  const isoMatch = str.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+
+    if (month >= 0 && month <= 11 && day >= 1 && day <= 31 && year >= 1900 && year <= 2025) {
+      return new Date(year, month, day);
+    }
+  }
+
+  // Try native Date parsing as last resort
+  try {
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear();
+      if (year >= 1900 && year <= 2025) {
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignore parsing errors
+  }
+
+  return null;
+}
+
+/**
+ * Calculate age from birth date (year-based only)
+ * Simply calculates: currentYear - birthYear
+ * Anyone born in the same year will have the same age
+ * 
+ * @param birthDate - Birth date (Date object or parseable value)
+ * @param referenceYear - Reference year for age calculation (default: current year)
+ * @returns Age in years, or null if birth date is invalid
+ */
+export function calculateAge(
+  birthDate: string | number | Date | null | undefined,
+  referenceYear: number = new Date().getFullYear()
+): number | null {
+  const parsedDate = birthDate instanceof Date ? birthDate : parseBirthDate(birthDate);
+
+  if (!parsedDate) return null;
+
+  const age = referenceYear - parsedDate.getFullYear();
+
+  // Validate reasonable age (0-150)
+  if (age >= 0 && age <= 150) {
+    return age;
+  }
+
+  return null;
+}
+
+/**
+ * Parse birth date and calculate age - convenience function
+ * Returns an object with both parsed date and calculated age
+ * 
+ * @param dateValue - The date value from Excel
+ * @returns Object with { birthDate, age } or { birthDate: null, age: null } if invalid
+ */
+export function parseBirthDateAndAge(dateValue: string | number | Date | null | undefined): {
+  birthDate: Date | null;
+  age: number | null;
+  formattedDate: string | null;
+} {
+  const birthDate = parseBirthDate(dateValue);
+
+  if (!birthDate) {
+    return { birthDate: null, age: null, formattedDate: null };
+  }
+
+  const age = calculateAge(birthDate);
+  const formattedDate = `${birthDate.getDate().toString().padStart(2, '0')}/${(birthDate.getMonth() + 1).toString().padStart(2, '0')}/${birthDate.getFullYear()}`;
+
+  return { birthDate, age, formattedDate };
+}
+
+/**
  * Generate class name from school prefix, grade, and current year
  * Format: SCHOOLPREFIX_GRADE_CURRENTYEAR (all uppercase)
  */
@@ -278,6 +508,8 @@ export interface StudentData {
   displayName: string;
   password: string;
   className: string;
+  birthDate?: string; // Original birth date value from Excel (formatted)
+  age?: number; // Calculated age (year-based: currentYear - birthYear)
   warning?: string; // Warning message for special characters, etc.
 }
 
@@ -303,7 +535,7 @@ export interface ProcessedData {
 }
 
 export function processExcelData(
-  excelRows: Array<{ fullName: string; grade: string; phoneNumber: string }>,
+  excelRows: Array<{ fullName: string; grade: string; phoneNumber: string; birthDate?: string | number | Date }>,
   schoolPrefix: string,
   existingUsernames: Set<string> = new Set(),
   existingDisplayNames: Set<string> = new Set()
@@ -360,13 +592,19 @@ export function processExcelData(
       const classNameWarning = validateClassName(className);
       const displayNameWarning = validateDisplayName(displayName);
 
+      // Parse and validate birth date
+      const birthDateValue = (row as any).birthDate;
+      const birthDateWarning = validateBirthDate(birthDateValue);
+      const parsedBirthDate = parseBirthDateAndAge(birthDateValue);
+
       // Combine warnings
       const warnings = [
         fullNameWarning,
         gradeWarning,
         usernameWarning,
         classNameWarning,
-        displayNameWarning
+        displayNameWarning,
+        birthDateWarning
       ].filter(Boolean);
       const combinedWarning = warnings.length > 0 ? warnings.join('; ') : undefined;
 
@@ -379,6 +617,8 @@ export function processExcelData(
         displayName,
         password: generatePassword(),
         className,
+        birthDate: parsedBirthDate.formattedDate || undefined,
+        age: parsedBirthDate.age || undefined,
         warning: combinedWarning
       });
 

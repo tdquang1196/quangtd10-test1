@@ -498,35 +498,46 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
           </CardHeader>
           <CardContent>
             {/* Warning Banner */}
-            {students.filter(s => s.warning).length > 0 && (
-              <div className="mb-4 p-4 bg-red-50 border-2 border-red-200 rounded-lg">
-                <div className="flex gap-3">
-                  <div className="flex-shrink-0">
-                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1">
-                    <h3 className="font-bold text-red-900 mb-2">
-                      ⚠️ {students.filter(s => s.warning).length} Students Have Special Characters
-                    </h3>
-                    <p className="text-sm text-red-800 mb-2">
-                      Please fix these names in your Excel file before uploading:
-                    </p>
-                    <ul className="text-sm text-red-700 space-y-1 max-h-32 overflow-auto">
-                      {students.filter(s => s.warning).slice(0, 10).map((s, i) => (
-                        <li key={i}>
-                          • <strong>{s.fullName}</strong>: {s.warning}
-                        </li>
-                      ))}
-                      {students.filter(s => s.warning).length > 10 && (
-                        <li className="text-red-500">...and {students.filter(s => s.warning).length - 10} more</li>
-                      )}
-                    </ul>
+            {students.filter(s => s.warning).length > 0 && (() => {
+              const studentsWithWarnings = students.filter(s => s.warning);
+              const ageWarnings = studentsWithWarnings.filter(s => s.warning?.includes('Age') && s.warning?.includes('>= 16'));
+              const otherWarnings = studentsWithWarnings.filter(s => !s.warning?.includes('Age') || !s.warning?.includes('>= 16'));
+
+              return (
+                <div className="mb-4 p-4 bg-red-50 border-2 border-red-200 rounded-lg">
+                  <div className="flex gap-3">
+                    <div className="flex-shrink-0">
+                      <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="font-bold text-red-900 mb-2">
+                        ⚠️ {studentsWithWarnings.length} Students Have Issues
+                      </h3>
+                      <div className="text-sm text-red-800 mb-2 space-y-1">
+                        {ageWarnings.length > 0 && (
+                          <p>🎂 <strong>{ageWarnings.length}</strong> students with age ≥ 16 (unusual for school migration)</p>
+                        )}
+                        {otherWarnings.length > 0 && (
+                          <p>📝 <strong>{otherWarnings.length}</strong> students with name/format issues</p>
+                        )}
+                      </div>
+                      <ul className="text-sm text-red-700 space-y-1 max-h-32 overflow-auto">
+                        {studentsWithWarnings.slice(0, 10).map((s, i) => (
+                          <li key={i}>
+                            • <strong>{s.fullName}</strong> ({s.grade}): {s.warning}
+                          </li>
+                        ))}
+                        {studentsWithWarnings.length > 10 && (
+                          <li className="text-red-500">...and {studentsWithWarnings.length - 10} more</li>
+                        )}
+                      </ul>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
             <div className="max-h-96 overflow-auto">
               <Table>
                 <TableHeader sticky>
@@ -536,6 +547,7 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                     <TableHead>Password</TableHead>
                     <TableHead>Grade</TableHead>
                     <TableHead>Class</TableHead>
+                    <TableHead>Age</TableHead>
                     <TableHead>Phone</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -563,6 +575,16 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                               <Badge variant="default">{student.grade}</Badge>
                             </TableCell>
                             <TableCell className="text-sm">{student.className}</TableCell>
+                            <TableCell className="text-sm text-center">
+                              {student.age ? (
+                                <Badge variant={student.age >= 16 ? "warning" : "info"}>
+                                  {student.age}
+                                  {student.age >= 16 && " ⚠️"}
+                                </Badge>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-sm text-gray-600">{student.phoneNumber}</TableCell>
                             <TableCell>
                               <Badge variant="error" className="text-xs">
@@ -581,6 +603,16 @@ export default function PreviewTab({ students, teachers, isCreating, progressMes
                               <Badge variant="default">{student.grade}</Badge>
                             </TableCell>
                             <TableCell className="text-sm">{student.className}</TableCell>
+                            <TableCell className="text-sm text-center">
+                              {student.age ? (
+                                <Badge variant={student.age >= 16 ? "warning" : "info"}>
+                                  {student.age}
+                                  {student.age >= 16 && " ⚠️"}
+                                </Badge>
+                              ) : (
+                                <span className="text-gray-400">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-sm text-gray-600">{student.phoneNumber}</TableCell>
                             <TableCell>
                               <Badge variant="success" className="text-xs">OK</Badge>

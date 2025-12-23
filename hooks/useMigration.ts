@@ -40,7 +40,8 @@ export const useMigration = () => {
     startRow: 2, // Default: row 2 (skip header)
     fullNameColumn: 'A',
     gradeColumn: 'B',
-    phoneNumberColumn: 'C',
+    phoneNumberColumn: '', // Optional: column containing phone number
+    birthDateColumn: '', // Optional: column containing birth date for age calculation
     usernameColumn: '', // Optional: if user already has username, skip them
     readAllSheets: false,
     excludeLastSheet: false // Optional: exclude last sheet (often teacher info)
@@ -98,6 +99,7 @@ export const useMigration = () => {
       fullNameColumn: string
       gradeColumn: string
       phoneNumberColumn: string
+      birthDateColumn: string
       usernameColumn: string
       readAllSheets: boolean
       excludeLastSheet: boolean
@@ -111,7 +113,8 @@ export const useMigration = () => {
       startRow: 2,
       fullNameColumn: 'A',
       gradeColumn: 'B',
-      phoneNumberColumn: 'C',
+      phoneNumberColumn: '',
+      birthDateColumn: '',
       usernameColumn: '',
       readAllSheets: false,
       excludeLastSheet: false
@@ -161,7 +164,8 @@ export const useMigration = () => {
       startRow: 2,
       fullNameColumn: 'A',
       gradeColumn: 'B',
-      phoneNumberColumn: 'C',
+      phoneNumberColumn: '',
+      birthDateColumn: '',
       usernameColumn: '',
       readAllSheets: false,
       excludeLastSheet: false
@@ -271,7 +275,13 @@ export const useMigration = () => {
           // Column indices
           const fullNameIdx = columnToIndex(excelConfig.fullNameColumn.toUpperCase())
           const gradeIdx = columnToIndex(excelConfig.gradeColumn.toUpperCase())
-          const phoneIdx = columnToIndex(excelConfig.phoneNumberColumn.toUpperCase())
+          // Optional columns - only read if mapping is provided
+          const phoneIdx = excelConfig.phoneNumberColumn
+            ? columnToIndex(excelConfig.phoneNumberColumn.toUpperCase())
+            : -1
+          const birthDateIdx = excelConfig.birthDateColumn
+            ? columnToIndex(excelConfig.birthDateColumn.toUpperCase())
+            : -1
           const usernameIdx = excelConfig.usernameColumn
             ? columnToIndex(excelConfig.usernameColumn.toUpperCase())
             : -1
@@ -321,10 +331,15 @@ export const useMigration = () => {
                   }
                 }
 
+                // Get optional values (only if column mapping is provided)
+                const phoneNumber = phoneIdx >= 0 ? (row[phoneIdx]?.toString().trim() || '') : ''
+                const birthDateValue = birthDateIdx >= 0 ? row[birthDateIdx] : undefined
+
                 return {
                   fullName: (row[fullNameIdx]?.toString().trim() || ''),
                   grade: (row[gradeIdx]?.toString().trim() || ''),
-                  phoneNumber: (row[phoneIdx]?.toString().trim() || ''),
+                  phoneNumber,
+                  birthDate: birthDateValue,
                   _sheet: sheetName,
                   _row: excelConfig.startRow + idx
                 }
@@ -558,7 +573,8 @@ export const useMigration = () => {
         displayName: student.displayName,
         password: student.password,
         classses: student.className,
-        phoneNumber: student.phoneNumber || ''
+        phoneNumber: student.phoneNumber || '',
+        age: student.age
       }))
 
       const listDataTeacher = teachers.map(teacher => ({
@@ -697,7 +713,13 @@ export const useMigration = () => {
               // Column indices (same as single school)
               const fullNameIdx = columnToIndex(config.fullNameColumn.toUpperCase())
               const gradeIdx = columnToIndex(config.gradeColumn.toUpperCase())
-              const phoneIdx = columnToIndex(config.phoneNumberColumn.toUpperCase())
+              // Optional columns - only read if mapping is provided
+              const phoneIdx = config.phoneNumberColumn
+                ? columnToIndex(config.phoneNumberColumn.toUpperCase())
+                : -1
+              const birthDateIdx = (config as any).birthDateColumn
+                ? columnToIndex((config as any).birthDateColumn.toUpperCase())
+                : -1
               const usernameIdx = config.usernameColumn
                 ? columnToIndex(config.usernameColumn.toUpperCase())
                 : -1
@@ -747,10 +769,15 @@ export const useMigration = () => {
                       }
                     }
 
+                    // Get optional values (only if column mapping is provided)
+                    const phoneNumber = phoneIdx >= 0 ? (row[phoneIdx]?.toString().trim() || '') : ''
+                    const birthDateValue = birthDateIdx >= 0 ? row[birthDateIdx] : undefined
+
                     return {
                       fullName: (row[fullNameIdx]?.toString().trim() || ''),
                       grade: (row[gradeIdx]?.toString().trim() || ''),
-                      phoneNumber: (row[phoneIdx]?.toString().trim() || ''),
+                      phoneNumber,
+                      birthDate: birthDateValue,
                       _sheet: sheetName,
                       _row: config.startRow + idx
                     }
@@ -841,7 +868,8 @@ export const useMigration = () => {
           displayName: student.displayName,
           password: student.password,
           classses: student.className,
-          phoneNumber: student.phoneNumber || ''
+          phoneNumber: student.phoneNumber || '',
+          age: student.age
         }))
 
         const listDataTeacher = school.teachers.map((teacher: any) => ({

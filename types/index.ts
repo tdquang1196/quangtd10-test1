@@ -7,6 +7,8 @@ export interface StudentData {
   grade: string
   className: string
   phoneNumber: string
+  birthDate?: string // Original birth date value from Excel
+  age?: number // Calculated age (year-based)
   warning?: string // Warning message for special characters, etc.
 }
 
@@ -23,6 +25,7 @@ export interface ExcelRow {
   fullName: string
   grade: string
   phoneNumber: string
+  birthDate?: string | number | Date // Birth date from Excel (various formats)
 }
 
 // Migration result types

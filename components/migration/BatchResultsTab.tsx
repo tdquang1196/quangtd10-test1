@@ -192,36 +192,40 @@ export default function BatchResultsTab({ results, onClose, retryBatchSchoolPack
                                         >
                                             🔑 Student Passwords
                                         </Button>
-                                        <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={() => copyToClipboard(
-                                                result.teachers.map(t => t.actualUserName || t.username).join('\n'),
-                                                'Teacher Usernames'
-                                            )}
-                                        >
-                                            📋 Teacher Usernames
-                                        </Button>
-                                        <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={() => copyToClipboard(
-                                                result.teachers.map(t => t.password).join('\n'),
-                                                'Teacher Passwords'
-                                            )}
-                                        >
-                                            🔑 Teacher Passwords
-                                        </Button>
-                                        <Button
-                                            variant="secondary"
-                                            size="sm"
-                                            onClick={() => copyToClipboard(
-                                                result.teachers.map(t => t.classses).join('\n'),
-                                                'Teacher Classes'
-                                            )}
-                                        >
-                                            🏫 Teacher Classes
-                                        </Button>
+                                        {result.teachers.length > 0 && (
+                                            <>
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    onClick={() => copyToClipboard(
+                                                        result.teachers.map(t => t.actualUserName || t.username).join('\n'),
+                                                        'Teacher Usernames'
+                                                    )}
+                                                >
+                                                    📋 Teacher Usernames
+                                                </Button>
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    onClick={() => copyToClipboard(
+                                                        result.teachers.map(t => t.password).join('\n'),
+                                                        'Teacher Passwords'
+                                                    )}
+                                                >
+                                                    🔑 Teacher Passwords
+                                                </Button>
+                                                <Button
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    onClick={() => copyToClipboard(
+                                                        result.teachers.map(t => t.classses).join('\n'),
+                                                        'Teacher Classes'
+                                                    )}
+                                                >
+                                                    🏫 Teacher Classes
+                                                </Button>
+                                            </>
+                                        )}
                                         <Button
                                             variant="secondary"
                                             size="sm"

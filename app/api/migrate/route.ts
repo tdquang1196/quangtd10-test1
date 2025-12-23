@@ -9,6 +9,7 @@ interface UserData {
   classses: string
   phoneNumber: string
   grade?: number
+  age?: number // Calculated from birth date
 }
 
 interface MigrationRequest {

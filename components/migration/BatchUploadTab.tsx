@@ -10,6 +10,7 @@ interface ExcelConfig {
     fullNameColumn: string
     gradeColumn: string
     phoneNumberColumn: string
+    birthDateColumn: string
     usernameColumn: string
     readAllSheets: boolean
     excludeLastSheet: boolean
@@ -45,7 +46,8 @@ const defaultExcelConfig: ExcelConfig = {
     startRow: 2,
     fullNameColumn: 'A',
     gradeColumn: 'B',
-    phoneNumberColumn: 'C',
+    phoneNumberColumn: '',
+    birthDateColumn: '',
     usernameColumn: '',
     readAllSheets: false,
     excludeLastSheet: false
@@ -265,9 +267,16 @@ export default function BatchUploadTab({
                                     <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
                                         Grade: {school.excelConfig.gradeColumn}
                                     </span>
-                                    <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
-                                        Phone: {school.excelConfig.phoneNumberColumn}
-                                    </span>
+                                    {school.excelConfig.phoneNumberColumn && (
+                                        <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded">
+                                            Phone: {school.excelConfig.phoneNumberColumn}
+                                        </span>
+                                    )}
+                                    {school.excelConfig.birthDateColumn && (
+                                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">
+                                            🎂 Age: {school.excelConfig.birthDateColumn}
+                                        </span>
+                                    )}
                                     {school.excelConfig.usernameColumn && (
                                         <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded">
                                             Username: {school.excelConfig.usernameColumn} (skip)
@@ -291,7 +300,7 @@ export default function BatchUploadTab({
                         {school.showConfig && (
                             <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-200">
                                 <h5 className="text-sm font-semibold text-purple-900 mb-3">Excel Column Configuration</h5>
-                                <div className="grid grid-cols-2 md:grid-cols-7 gap-3">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                     <div>
                                         <label className="block text-xs font-medium text-gray-600 mb-1">Start Row</label>
                                         <Input
@@ -304,7 +313,7 @@ export default function BatchUploadTab({
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-600 mb-1">Name Col</label>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Name Col *</label>
                                         <Input
                                             value={school.excelConfig.fullNameColumn}
                                             onChange={(e) => updateSchoolConfig(school.id, { fullNameColumn: e.target.value.toUpperCase() })}
@@ -314,7 +323,7 @@ export default function BatchUploadTab({
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-medium text-gray-600 mb-1">Grade Col</label>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">Grade Col *</label>
                                         <Input
                                             value={school.excelConfig.gradeColumn}
                                             onChange={(e) => updateSchoolConfig(school.id, { gradeColumn: e.target.value.toUpperCase() })}
@@ -332,6 +341,17 @@ export default function BatchUploadTab({
                                             className="uppercase text-sm"
                                             maxLength={2}
                                         />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-medium text-gray-600 mb-1">🎂 Birth Date Col</label>
+                                        <Input
+                                            value={school.excelConfig.birthDateColumn}
+                                            onChange={(e) => updateSchoolConfig(school.id, { birthDateColumn: e.target.value.toUpperCase() })}
+                                            placeholder="D"
+                                            className="uppercase text-sm"
+                                            maxLength={2}
+                                        />
+                                        <p className="text-xs text-blue-600 mt-0.5">For age calc</p>
                                     </div>
                                     <div>
                                         <label className="block text-xs font-medium text-gray-600 mb-1">Username Col</label>
