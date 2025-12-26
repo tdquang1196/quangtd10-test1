@@ -43,6 +43,17 @@ export const FEATURES: Feature[] = [
     route: '/features/fb-auto-comment',
     status: 'active',
     category: 'tools'
+  },
+  {
+    id: 'delete-account',
+    title: 'Delete Account',
+    description: 'Xóa hàng loạt account từ file Excel. Import danh sách username/password và tự động login để xóa từng account.',
+    icon: '🗑️',
+    color: 'red',
+    gradient: 'from-red-500 to-rose-600',
+    route: '/features/delete-account',
+    status: 'active',
+    category: 'admin'
   }
 ]
 

@@ -407,7 +407,7 @@ export class MigrationService {
   private async getExistingUsernames(filter: string): Promise<Set<string>> {
     try {
       const response = await this.adminClient!.get<GetUsersResult>(
-        `/manage/Users?pageIndex=1&pageSize=1000&filter=${filter}`
+        `/manage/Users?pageIndex=1&pageSize=1000&userNames=${filter}`
       )
       return new Set(
         response.data.users
@@ -422,7 +422,7 @@ export class MigrationService {
   private async getExistingDisplayNames(filter: string): Promise<Set<string>> {
     try {
       const response = await this.adminClient!.get<GetUsersResult>(
-        `/manage/Users?pageIndex=1&pageSize=1000&filter=${filter}`
+        `/manage/Users?pageIndex=1&pageSize=1000&displayName=${filter}`
       )
       return new Set(
         response.data.users
@@ -580,6 +580,15 @@ export class MigrationService {
           }
         } else {
           console.error(`[validateDisplayName] Error validating '${displayName}':`, error.message)
+
+          // Check for maintenance error - should throw to propagate up
+          const isMaintenance = error.response?.status === 406 ||
+            error.response?.data?.isMaintain === true
+          if (isMaintenance) {
+            throw new Error('SYSTEM_MAINTENANCE: Display name validation unavailable')
+          }
+
+          // For other non-critical errors, return null (will use default display name)
           return null
         }
       }
@@ -588,6 +597,7 @@ export class MigrationService {
   /**
    * Set equipment, display name, age, and phone number in a single API call
    * Matches backend: ChangeUserEquipmentCommand { Age, ListItem, DisplayName, PhoneNumber }
+   * @throws Error on any failure (including maintenance mode)
    */
   private async setEquipmentAndProfile(
     client: AxiosInstance,
@@ -621,9 +631,19 @@ export class MigrationService {
       console.log(`[Equipment] Payload: age=${age}, phone=${phoneNumber ? 'yes' : 'no'}, displayName=${displayName}`)
       await client.post('/account/equipment', payload)
       return true
-    } catch (error) {
-      console.error('Equipment assignment error:', error)
-      return false
+    } catch (error: any) {
+      // Check if it's a maintenance error
+      const isMaintenance = error.response?.status === 406 ||
+        error.response?.data?.isMaintain === true
+
+      if (isMaintenance) {
+        console.error('Equipment assignment error: System under maintenance (406)')
+        throw new Error('SYSTEM_MAINTENANCE: Equipment API unavailable')
+      }
+
+      // Log and re-throw any other errors
+      console.error('Equipment assignment error:', error.message || error)
+      throw new Error(`Equipment assignment failed: ${error.response?.data?.message || error.message || 'Unknown error'}`)
     }
   }
 
@@ -785,8 +805,12 @@ export class MigrationService {
           { context: `Equipment+Phone ${user.actualUserName}`, maxRetries: 3 }
         )
         user.state = { ...user.state, equipmentSet: true, phoneUpdated: true }
-      } catch (error) {
-        console.error('Equipment/Phone setup failed after retries:', error)
+      } catch (error: any) {
+        // Equipment/Phone failed - add to error list with current state
+        user.reason = error.message || 'Equipment/Phone setup failed'
+        user.retryCount = (user.retryCount || 0) + 1
+        listUserError.push({ ...user })
+        console.error(`Equipment/Phone setup failed after retries for ${user.actualUserName}:`, error.message)
       }
     }
   }
@@ -1572,16 +1596,18 @@ export class MigrationService {
 
           const defaultDisplayName = user.loginDisplayName || user.actualUserName!
 
-          // Validate display name if not done before
-          if (!user.actualDisplayName) {
-            const validatedDisplayName = await this.validateDisplayName(
-              userClient,
-              user.displayName,
-              user.actualUserName!,
-              defaultDisplayName
-            )
-            user.actualDisplayName = validatedDisplayName || defaultDisplayName
-          }
+          // ALWAYS validate and regenerate display name on retry (don't reuse from previous attempt)
+          // This gives fresh validation chance even if previous attempt used fallback
+          console.log(`${getTimestamp()} [${i + 1}] Validating display name: ${user.displayName}`)
+          const validatedDisplayName = await this.validateDisplayName(
+            userClient,
+            user.displayName,
+            user.actualUserName!,
+            defaultDisplayName
+          )
+          user.actualDisplayName = validatedDisplayName || defaultDisplayName
+          console.log(`${getTimestamp()} [${i + 1}] Display name set to: ${user.actualDisplayName}`)
+
 
           // Set equipment, age, and phone in a single API call if not done
           if (!user.state?.equipmentSet || !user.state?.phoneUpdated) {
@@ -1592,8 +1618,10 @@ export class MigrationService {
               )
               user.state = { ...user.state, equipmentSet: true, phoneUpdated: true }
               console.log(`${getTimestamp()} [${i + 1}] ✓ Equipment+Phone set`)
-            } catch (error) {
-              console.error(`${getTimestamp()} [${i + 1}] ⚠ Equipment/Phone setup failed, continuing...`)
+            } catch (error: any) {
+              // Equipment/Phone failed - throw error to be caught by outer block
+              console.error(`${getTimestamp()} [${i + 1}] ❌ Equipment/Phone setup failed after retries`)
+              throw new Error(`Equipment/Phone setup failed: ${error.message}`)
             }
           }
         } else {
