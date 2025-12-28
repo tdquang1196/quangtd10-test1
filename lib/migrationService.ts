@@ -18,6 +18,7 @@ interface UserData {
   age?: number // Calculated age from birth date (year-based)
   accessToken?: string // Store access token from registration to avoid re-login
   loginDisplayName?: string // Store login display name from Phase 1 for fallback in Phase 2
+  isTeacher?: boolean // True if user is a teacher
 
   // State tracking for resume-from-failed-step retry
   state?: {
@@ -800,8 +801,10 @@ export class MigrationService {
     // This combines equipmentSet and phoneUpdated into one step
     if (!user.state?.equipmentSet || !user.state?.phoneUpdated) {
       try {
+        // For teachers, use loginDisplayName for equipment display name
+        const equipmentDisplayName = user.isTeacher ? (user.loginDisplayName || user.actualDisplayName!) : user.actualDisplayName!
         await retryWithBackoff(
-          () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!, user.age, user.phoneNumber),
+          () => this.setEquipmentAndProfile(userClient, equipmentDisplayName, user.age, user.phoneNumber),
           { context: `Equipment+Phone ${user.actualUserName}`, maxRetries: 3 }
         )
         user.state = { ...user.state, equipmentSet: true, phoneUpdated: true }
@@ -1053,6 +1056,7 @@ export class MigrationService {
     })
     teachersToCreate.forEach((teacher, index) => {
       (teacher as any).originalIndex = students.length + index
+      teacher.isTeacher = true // Mark as teacher for equipment initialization
     })
 
     // ===== PHASE 1: USER REGISTRATION (Grouped by Username) =====
@@ -1612,8 +1616,10 @@ export class MigrationService {
           // Set equipment, age, and phone in a single API call if not done
           if (!user.state?.equipmentSet || !user.state?.phoneUpdated) {
             try {
+              // For teachers, use loginDisplayName for equipment display name
+              const equipmentDisplayName = user.isTeacher ? (user.loginDisplayName || user.actualDisplayName!) : user.actualDisplayName!
               await retryWithBackoff(
-                () => this.setEquipmentAndProfile(userClient, user.actualDisplayName!, user.age, user.phoneNumber),
+                () => this.setEquipmentAndProfile(userClient, equipmentDisplayName, user.age, user.phoneNumber),
                 { context: `Equipment+Phone ${user.actualUserName}`, maxRetries: 3 }
               )
               user.state = { ...user.state, equipmentSet: true, phoneUpdated: true }
