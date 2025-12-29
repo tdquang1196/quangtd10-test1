@@ -1,17 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { MigrationService } from '@/lib/migrationService'
+import { getActiveMigrationService } from '@/lib/migrationState'
 
-// Store the active migration service instance
-// In a production app, you might want to use Redis or similar for cross-process state
-let activeMigrationService: MigrationService | null = null
-
-export function setActiveMigrationService(service: MigrationService | null) {
-    activeMigrationService = service
-}
-
-export function getActiveMigrationService(): MigrationService | null {
-    return activeMigrationService
-}
+// NOTE: setActiveMigrationService and getActiveMigrationService are now in @/lib/migrationState
+// Import from there if needed in other files
 
 /**
  * POST /api/migrate/control
@@ -28,6 +19,7 @@ export async function POST(request: NextRequest) {
             )
         }
 
+        const activeMigrationService = getActiveMigrationService()
         if (!activeMigrationService) {
             return NextResponse.json(
                 { error: 'No active migration to control' },
@@ -84,6 +76,7 @@ export async function POST(request: NextRequest) {
  */
 export async function GET() {
     try {
+        const activeMigrationService = getActiveMigrationService()
         if (!activeMigrationService) {
             return NextResponse.json({
                 status: 'idle',

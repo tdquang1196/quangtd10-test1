@@ -3,6 +3,20 @@
  * Handles pause/resume/cancel functionality with localStorage persistence
  */
 
+import { MigrationService } from '@/lib/migrationService'
+
+// Store the active migration service instance
+// In a production app, you might want to use Redis or similar for cross-process state
+let activeMigrationService: MigrationService | null = null
+
+export function setActiveMigrationService(service: MigrationService | null) {
+    activeMigrationService = service
+}
+
+export function getActiveMigrationService(): MigrationService | null {
+    return activeMigrationService
+}
+
 // Migration execution status
 export type MigrationStatus = 'idle' | 'running' | 'paused' | 'cancelled' | 'completed'
 

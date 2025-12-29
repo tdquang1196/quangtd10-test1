@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { MigrationService } from '@/lib/migrationService'
-import { setActiveMigrationService } from './control/route'
+import { setActiveMigrationService } from '@/lib/migrationState'
 
 interface UserData {
   username: string
