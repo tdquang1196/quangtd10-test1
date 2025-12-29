@@ -3,7 +3,7 @@
  * CRUD operations for scheduler config, logs, and scan state
  */
 
-import { supabaseAdmin, SchedulerConfigRow, SchedulerLogRow, ScanStateRow } from './supabase-client';
+import { getSupabaseAdmin, SchedulerConfigRow, SchedulerLogRow, ScanStateRow } from './supabase-client';
 
 // ==================== CONFIG ====================
 
@@ -11,7 +11,7 @@ import { supabaseAdmin, SchedulerConfigRow, SchedulerLogRow, ScanStateRow } from
  * Get scheduler config
  */
 export async function getSchedulerConfig(): Promise<SchedulerConfigRow | null> {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await getSupabaseAdmin()
         .from('fb_scheduler_config')
         .select('*')
         .single();
@@ -27,7 +27,7 @@ export async function getSchedulerConfig(): Promise<SchedulerConfigRow | null> {
  * Update scheduler config
  */
 export async function updateSchedulerConfig(updates: Partial<SchedulerConfigRow>): Promise<boolean> {
-    const { error } = await supabaseAdmin
+    const { error } = await getSupabaseAdmin()
         .from('fb_scheduler_config')
         .update({
             ...updates,
@@ -83,7 +83,7 @@ const MAX_LOGS = 500;
  * Add a log entry
  */
 export async function addLog(type: SchedulerLogRow['type'], message: string): Promise<void> {
-    const { error } = await supabaseAdmin
+    const { error } = await getSupabaseAdmin()
         .from('fb_scheduler_logs')
         .insert({ type, message });
 
@@ -99,7 +99,7 @@ export async function addLog(type: SchedulerLogRow['type'], message: string): Pr
  * Get recent logs
  */
 export async function getLogs(limit: number = 100): Promise<SchedulerLogRow[]> {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await getSupabaseAdmin()
         .from('fb_scheduler_logs')
         .select('*')
         .order('created_at', { ascending: false })
@@ -116,7 +116,7 @@ export async function getLogs(limit: number = 100): Promise<SchedulerLogRow[]> {
  * Clear all logs
  */
 export async function clearLogs(): Promise<void> {
-    const { error } = await supabaseAdmin
+    const { error } = await getSupabaseAdmin()
         .from('fb_scheduler_logs')
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
@@ -130,7 +130,7 @@ export async function clearLogs(): Promise<void> {
  * Cleanup old logs to keep database size manageable
  */
 async function cleanupOldLogs(): Promise<void> {
-    const { data: logs } = await supabaseAdmin
+    const { data: logs } = await getSupabaseAdmin()
         .from('fb_scheduler_logs')
         .select('id, created_at')
         .order('created_at', { ascending: false });
@@ -138,7 +138,7 @@ async function cleanupOldLogs(): Promise<void> {
     if (logs && logs.length > MAX_LOGS) {
         const idsToDelete = logs.slice(MAX_LOGS).map(log => log.id);
 
-        await supabaseAdmin
+        await getSupabaseAdmin()
             .from('fb_scheduler_logs')
             .delete()
             .in('id', idsToDelete);
@@ -151,7 +151,7 @@ async function cleanupOldLogs(): Promise<void> {
  * Get scan state
  */
 export async function getScanState(): Promise<ScanStateRow | null> {
-    const { data, error } = await supabaseAdmin
+    const { data, error } = await getSupabaseAdmin()
         .from('fb_scan_state')
         .select('*')
         .single();
@@ -167,7 +167,7 @@ export async function getScanState(): Promise<ScanStateRow | null> {
  * Update scan state
  */
 export async function updateScanState(updates: Partial<ScanStateRow>): Promise<boolean> {
-    const { error } = await supabaseAdmin
+    const { error } = await getSupabaseAdmin()
         .from('fb_scan_state')
         .update({
             ...updates,

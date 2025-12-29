@@ -3,20 +3,52 @@
  * Handles database operations for scheduler config, logs, and scan state
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Environment variables
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// Lazy-load clients to avoid build-time errors when env vars are not set
+let _supabase: SupabaseClient | null = null;
+let _supabaseAdmin: SupabaseClient | null = null;
 
-// Public client (for client-side usage)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+function getSupabaseUrl(): string {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!url) {
+        throw new Error('NEXT_PUBLIC_SUPABASE_URL is not configured');
+    }
+    return url;
+}
 
-// Admin client (for server-side usage with full access)
-export const supabaseAdmin = supabaseServiceKey
-    ? createClient(supabaseUrl, supabaseServiceKey)
-    : supabase;
+function getSupabaseAnonKey(): string {
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!key) {
+        throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY is not configured');
+    }
+    return key;
+}
+
+// Public client (for client-side usage) - lazy loaded
+export function getSupabase(): SupabaseClient {
+    if (!_supabase) {
+        _supabase = createClient(getSupabaseUrl(), getSupabaseAnonKey());
+    }
+    return _supabase;
+}
+
+// Admin client (for server-side usage with full access) - lazy loaded
+export function getSupabaseAdmin(): SupabaseClient {
+    if (!_supabaseAdmin) {
+        const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (serviceKey) {
+            _supabaseAdmin = createClient(getSupabaseUrl(), serviceKey);
+        } else {
+            _supabaseAdmin = getSupabase();
+        }
+    }
+    return _supabaseAdmin;
+}
+
+// Legacy exports for backwards compatibility (use functions above instead)
+export const supabase = { get: getSupabase };
+export const supabaseAdmin = { get: getSupabaseAdmin };
 
 // Types matching database schema
 export interface SchedulerConfigRow {
