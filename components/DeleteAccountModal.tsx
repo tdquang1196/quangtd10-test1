@@ -157,7 +157,7 @@ export default function DeleteAccountModal({ isOpen, onClose }: DeleteAccountMod
             <div className="flex gap-3">
                 <Button
                     onClick={() => setStep('upload')}
-                    variant="outline"
+                // variant="outline"
                 >
                     Back
                 </Button>
