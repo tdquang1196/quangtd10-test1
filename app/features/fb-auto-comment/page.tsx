@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import BackgroundSchedulerPanel from '@/components/BackgroundSchedulerPanel';
 
 interface SchedulerStatus {
     isRunning: boolean;
@@ -565,6 +566,11 @@ export default function FBAutoCommentPage() {
                     <p className="text-gray-600 mt-2">
                         Tự động comment vào tất cả posts/reels của Facebook Page
                     </p>
+                </div>
+
+                {/* Background Scheduler Panel - 24/7 Mode */}
+                <div className="mb-6">
+                    <BackgroundSchedulerPanel />
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
