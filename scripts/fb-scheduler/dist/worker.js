@@ -172,56 +172,77 @@ async function runAutoComment(config, scanState) {
     await log('info', `Found ${posts.length} posts to check`);
     let commentsPosted = 0;
     let commentsSkipped = 0;
+    let postsProcessed = 0;
     for (const post of posts) {
         // Skip private posts
         if (post.privacy?.value === 'SELF') {
-            await log('info', `Skipping private post: ${post.id}`);
+            await log('info', `🔒 Skipping private post: ${post.id}`);
             continue;
         }
         // Skip if no message
         if (!post.message) {
             continue;
         }
-        // Get random comment from list
-        const randomComment = comments[Math.floor(Math.random() * comments.length)];
-        // Check if already commented with similar message
-        if (isAlreadyCommented(post.id, randomComment, commentTracking)) {
-            commentsSkipped++;
-            continue;
-        }
-        // Check existing comments on post
+        postsProcessed++;
+        const postPreview = post.message.substring(0, 50) + (post.message.length > 50 ? '...' : '');
+        await log('info', `📄 [${postsProcessed}/${posts.length}] Post ${post.id}: ${postPreview}`);
+        // Get existing comments on this post from Facebook
         const existingComments = await getPageCommentsOnPost(post.id, access_token);
-        const alreadyCommentedOnFB = existingComments.some(c => getFirstNWords(c.message || '') === getFirstNWords(randomComment));
-        if (alreadyCommentedOnFB) {
-            commentsSkipped++;
-            // Update tracking
+        // Sync existing comments to tracking
+        for (const ec of existingComments) {
             if (!commentTracking[post.id])
                 commentTracking[post.id] = [];
-            commentTracking[post.id].push(getFirstNWords(randomComment));
-            continue;
+            const prefix = getFirstNWords(ec.message || '');
+            if (!commentTracking[post.id].includes(prefix)) {
+                commentTracking[post.id].push(prefix);
+            }
         }
-        // Post the comment
-        const success = await postComment(post.id, randomComment, access_token);
-        if (success) {
-            commentsPosted++;
-            await log('success', `✅ Commented on post ${post.id}`);
-            // Update tracking
-            if (!commentTracking[post.id])
-                commentTracking[post.id] = [];
-            commentTracking[post.id].push(getFirstNWords(randomComment));
-            // Delay between comments
-            if (delay_between_comments > 0) {
-                await new Promise(r => setTimeout(r, delay_between_comments * 1000));
+        // Loop through ALL comments (like web version)
+        for (let cmtIndex = 0; cmtIndex < comments.length; cmtIndex++) {
+            const commentText = comments[cmtIndex];
+            const commentPreview = commentText.substring(0, 40) + (commentText.length > 40 ? '...' : '');
+            // Check if already commented
+            if (isAlreadyCommented(post.id, commentText, commentTracking)) {
+                commentsSkipped++;
+                continue;
+            }
+            // Double-check on Facebook before posting
+            const freshComments = await getPageCommentsOnPost(post.id, access_token);
+            const alreadyOnFB = freshComments.some(c => getFirstNWords(c.message || '') === getFirstNWords(commentText));
+            if (alreadyOnFB) {
+                commentsSkipped++;
+                // Update tracking
+                if (!commentTracking[post.id])
+                    commentTracking[post.id] = [];
+                commentTracking[post.id].push(getFirstNWords(commentText));
+                await log('info', `⏭️ Comment đã có trên Facebook: "${commentPreview}"`);
+                continue;
+            }
+            // Post the comment
+            await log('info', `💬 [Comment ${cmtIndex + 1}/${comments.length}] Đang post: "${commentPreview}"`);
+            const success = await postComment(post.id, commentText, access_token);
+            if (success) {
+                commentsPosted++;
+                await log('success', `✅ Posted comment ${cmtIndex + 1} on post ${post.id}`);
+                // Update tracking
+                if (!commentTracking[post.id])
+                    commentTracking[post.id] = [];
+                commentTracking[post.id].push(getFirstNWords(commentText));
+                // Delay between comments
+                if (delay_between_comments > 0) {
+                    await log('info', `⏳ Waiting ${delay_between_comments}s...`);
+                    await new Promise(r => setTimeout(r, delay_between_comments * 1000));
+                }
             }
         }
     }
     // Update scan state
     await updateScanState(scanState.id, {
         comment_tracking: commentTracking,
-        total_posts_processed: scanState.total_posts_processed + posts.length,
+        total_posts_processed: scanState.total_posts_processed + postsProcessed,
         last_processed_post_time: posts[0]?.created_time || scanState.last_processed_post_time
     });
-    await log('success', `✅ Run completed: ${commentsPosted} posted, ${commentsSkipped} skipped`);
+    await log('success', `🎉 Run completed: ${commentsPosted} posted, ${commentsSkipped} skipped, ${postsProcessed} posts processed`);
 }
 // ==================== MAIN LOOP ====================
 // Flag to prevent concurrent runs
