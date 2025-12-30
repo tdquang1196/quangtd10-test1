@@ -224,7 +224,14 @@ async function runAutoComment(config, scanState) {
     await log('success', `✅ Run completed: ${commentsPosted} posted, ${commentsSkipped} skipped`);
 }
 // ==================== MAIN LOOP ====================
+// Flag to prevent concurrent runs
+let isRunning = false;
 async function checkAndRun() {
+    // Prevent concurrent runs
+    if (isRunning) {
+        console.log('⏸️ Previous run still in progress, skipping...');
+        return;
+    }
     const config = await getConfig();
     if (!config) {
         console.log('⚠️ No config found');
@@ -243,10 +250,12 @@ async function checkAndRun() {
         console.log(`⏳ Next run in ${timeUntil} minutes`);
         return;
     }
-    // Time to run!
+    // Time to run! Set flag
+    isRunning = true;
     const scanState = await getScanState();
     if (!scanState) {
         await log('error', 'No scan state found');
+        isRunning = false;
         return;
     }
     try {
@@ -262,6 +271,8 @@ async function checkAndRun() {
         next_run_at: nextRun.toISOString()
     });
     await log('info', `📅 Next run scheduled at: ${nextRun.toISOString()}`);
+    // Clear flag
+    isRunning = false;
 }
 // ==================== STARTUP ====================
 async function main() {

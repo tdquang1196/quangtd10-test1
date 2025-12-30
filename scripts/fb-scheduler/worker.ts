@@ -291,7 +291,16 @@ async function runAutoComment(config: SchedulerConfig, scanState: ScanState): Pr
 
 // ==================== MAIN LOOP ====================
 
+// Flag to prevent concurrent runs
+let isRunning = false;
+
 async function checkAndRun(): Promise<void> {
+    // Prevent concurrent runs
+    if (isRunning) {
+        console.log('⏸️ Previous run still in progress, skipping...');
+        return;
+    }
+
     const config = await getConfig();
 
     if (!config) {
@@ -315,10 +324,13 @@ async function checkAndRun(): Promise<void> {
         return;
     }
 
-    // Time to run!
+    // Time to run! Set flag
+    isRunning = true;
+
     const scanState = await getScanState();
     if (!scanState) {
         await log('error', 'No scan state found');
+        isRunning = false;
         return;
     }
 
@@ -336,6 +348,9 @@ async function checkAndRun(): Promise<void> {
     });
 
     await log('info', `📅 Next run scheduled at: ${nextRun.toISOString()}`);
+
+    // Clear flag
+    isRunning = false;
 }
 
 // ==================== STARTUP ====================
