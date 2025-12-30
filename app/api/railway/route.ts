@@ -36,7 +36,7 @@ async function railwayQuery(query: string, variables?: Record<string, any>) {
     return data.data;
 }
 
-// Get service status
+// Get service status and environment info
 async function getServiceStatus() {
     const query = `
         query getService($serviceId: String!) {
@@ -49,6 +49,7 @@ async function getServiceStatus() {
                             id
                             status
                             createdAt
+                            environmentId
                         }
                     }
                 }
@@ -60,17 +61,49 @@ async function getServiceStatus() {
     return data?.service;
 }
 
-// Redeploy service (start)
-async function startService() {
+// Get environments for service
+async function getEnvironments() {
     const query = `
-        mutation deployService($serviceId: String!, $environmentId: String!) {
-            serviceInstanceDeploy(serviceId: $serviceId, environmentId: $environmentId)
+        query getProject($projectId: String!) {
+            project(id: $projectId) {
+                environments {
+                    edges {
+                        node {
+                            id
+                            name
+                        }
+                    }
+                }
+            }
+        }
+    `;
+
+    const data = await railwayQuery(query, { projectId: RAILWAY_PROJECT_ID });
+    return data?.project?.environments?.edges || [];
+}
+
+// Redeploy service (start) - use serviceInstanceRedeploy
+async function startService() {
+    // First, get the environment ID
+    const environments = await getEnvironments();
+    const prodEnv = environments.find((e: any) => e.node.name === 'production') || environments[0];
+
+    if (!prodEnv) {
+        throw new Error('No environment found');
+    }
+
+    const environmentId = prodEnv.node.id;
+
+    // Use serviceInstanceRedeploy mutation
+    const query = `
+        mutation redeployService($serviceId: String!, $environmentId: String!) {
+            serviceInstanceRedeploy(serviceId: $serviceId, environmentId: $environmentId)
         }
     `;
 
     await railwayQuery(query, {
         serviceId: RAILWAY_SERVICE_ID,
-        environmentId: RAILWAY_ENVIRONMENT_ID,
+        environmentId: environmentId,
     });
 }
 
