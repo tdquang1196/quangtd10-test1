@@ -57,6 +57,15 @@ export default function BackgroundSchedulerPanel() {
     const [newComment, setNewComment] = useState('');
     const [showToken, setShowToken] = useState(false);
 
+    // Railway control state
+    const [railwayStatus, setRailwayStatus] = useState<{
+        configured: boolean;
+        status?: string;
+        serviceName?: string;
+        error?: string;
+    } | null>(null);
+    const [railwayLoading, setRailwayLoading] = useState(false);
+
     // Fetch status and config
     const fetchStatus = useCallback(async () => {
         try {
@@ -89,15 +98,59 @@ export default function BackgroundSchedulerPanel() {
         }
     }, []);
 
+    // Fetch Railway status
+    const fetchRailwayStatus = useCallback(async () => {
+        try {
+            const res = await fetch('/api/railway');
+            const data = await res.json();
+            setRailwayStatus(data);
+        } catch (err) {
+            console.error('Failed to fetch Railway status:', err);
+        }
+    }, []);
+
+    // Railway control
+    const controlRailway = async (action: 'start' | 'stop') => {
+        setRailwayLoading(true);
+        setError(null);
+
+        try {
+            const res = await fetch('/api/railway', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action })
+            });
+
+            const data = await res.json();
+
+            if (data.error) {
+                setError(data.error);
+            } else {
+                setSuccess(data.message);
+                setTimeout(() => setSuccess(null), 3000);
+                // Refresh status after a delay
+                setTimeout(fetchRailwayStatus, 2000);
+            }
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setRailwayLoading(false);
+        }
+    };
+
     // Load on mount
     useEffect(() => {
         fetchStatus();
         fetchConfig();
+        fetchRailwayStatus();
 
         // Poll status every 30 seconds
-        const interval = setInterval(fetchStatus, 30000);
+        const interval = setInterval(() => {
+            fetchStatus();
+            fetchRailwayStatus();
+        }, 30000);
         return () => clearInterval(interval);
-    }, [fetchStatus, fetchConfig]);
+    }, [fetchStatus, fetchConfig, fetchRailwayStatus]);
 
     // Toggle scheduler
     const toggleScheduler = async () => {
@@ -231,8 +284,8 @@ export default function BackgroundSchedulerPanel() {
                         onClick={toggleScheduler}
                         disabled={loading}
                         className={`px-4 py-2 rounded-lg font-medium transition-colors ${status?.enabled
-                                ? 'bg-red-500 hover:bg-red-600 text-white'
-                                : 'bg-green-500 hover:bg-green-600 text-white'
+                            ? 'bg-red-500 hover:bg-red-600 text-white'
+                            : 'bg-green-500 hover:bg-green-600 text-white'
                             } disabled:opacity-50`}
                     >
                         {loading ? '...' : status?.enabled ? 'Disable' : 'Enable'}
@@ -251,6 +304,55 @@ export default function BackgroundSchedulerPanel() {
                     ✅ {success}
                 </div>
             )}
+
+            {/* Railway Worker Control */}
+            <div className="mx-6 mt-4 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg">
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="font-medium text-purple-900 flex items-center gap-2">
+                            🚂 Railway Worker Control
+                            {railwayStatus?.configured === false && (
+                                <span className="text-xs text-orange-600 font-normal">(Not configured)</span>
+                            )}
+                        </h3>
+                        <p className="text-sm text-purple-600">
+                            {railwayStatus?.status === 'SUCCESS' && '✅ Worker đang chạy'}
+                            {railwayStatus?.status === 'REMOVED' && '⏸️ Worker đã dừng'}
+                            {railwayStatus?.status === 'DEPLOYING' && '🔄 Đang deploy...'}
+                            {!railwayStatus?.status && railwayStatus?.configured && 'Kiểm tra trạng thái...'}
+                            {railwayStatus?.configured === false && 'Cần cấu hình Railway API Token'}
+                        </p>
+                    </div>
+
+                    {railwayStatus?.configured && (
+                        <div className="flex gap-2">
+                            <button
+                                onClick={() => controlRailway('start')}
+                                disabled={railwayLoading || railwayStatus?.status === 'SUCCESS'}
+                                className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {railwayLoading ? '...' : '▶️ Start'}
+                            </button>
+                            <button
+                                onClick={() => controlRailway('stop')}
+                                disabled={railwayLoading || railwayStatus?.status === 'REMOVED'}
+                                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {railwayLoading ? '...' : '⏹️ Stop'}
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {railwayStatus?.configured === false && (
+                    <div className="mt-3 text-xs text-purple-700 bg-purple-100 p-2 rounded">
+                        <strong>Setup:</strong> Thêm các biến môi trường trong Vercel:
+                        <code className="block mt-1 bg-white p-1 rounded text-purple-800">
+                            RAILWAY_API_TOKEN, RAILWAY_PROJECT_ID, RAILWAY_SERVICE_ID
+                        </code>
+                    </div>
+                )}
+            </div>
 
             <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Left Column - Config */}
