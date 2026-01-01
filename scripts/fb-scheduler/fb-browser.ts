@@ -407,7 +407,7 @@ export class FacebookBrowser {
             const postLinks = await this.page.evaluate(() => {
                 const links: string[] = [];
                 const anchors = document.querySelectorAll('a[href*="/posts/"], a[href*="/videos/"], a[href*="/reel/"]');
-                anchors.forEach(a => {
+                anchors.forEach((a: Element) => {
                     const href = a.getAttribute('href');
                     if (href && !links.includes(href)) {
                         links.push(href);

@@ -97,21 +97,43 @@ class FacebookBrowser {
         if (!this.page || !this.context) {
             throw new Error('Browser not initialized');
         }
-        console.log('[FB Browser] Attempting login...');
+        console.log('[FB Browser] 📍 Step 1/4: Attempting login...');
         try {
             // Try cookie-based login first
             if (this.credentials.cookies) {
-                console.log('[FB Browser] Using cookie-based login');
+                console.log('[FB Browser] 📍 Step 2/4: Parsing cookies...');
                 const cookies = JSON.parse(this.credentials.cookies);
+                console.log(`[FB Browser] ✅ Found ${cookies.length} cookies: ${cookies.map((c) => c.name).join(', ')}`);
+                console.log('[FB Browser] 📍 Step 3/4: Adding cookies to browser...');
                 await this.context.addCookies(cookies);
+                console.log('[FB Browser] ✅ Cookies added');
+                console.log('[FB Browser] 📍 Step 4/4: Navigating to Facebook...');
                 // Navigate to Facebook to verify cookies
                 await this.page.goto('https://www.facebook.com/', {
-                    waitUntil: 'networkidle',
-                    timeout: 30000
+                    waitUntil: 'domcontentloaded',
+                    timeout: 60000
                 });
+                console.log('[FB Browser] ✅ Page loaded, URL:', this.page.url());
+                console.log('[FB Browser] 📍 Waiting for page to stabilize...');
                 await randomDelay(2000, 4000);
-                // Check if logged in by looking for user menu
-                const isLogged = await this.page.locator('[aria-label="Tài khoản của bạn"], [aria-label="Your account"], [aria-label="Account"]').count() > 0;
+                // Check if logged in by looking for logged-in indicators
+                // Use multiple selectors that work on Vietnamese Facebook
+                const loginSelectors = [
+                    '[aria-label="Menu"]',
+                    '[aria-label="Trang chủ"]',
+                    '[aria-label="Home"]',
+                    'a[href*="/me"]',
+                    'div[role="navigation"]'
+                ];
+                let isLogged = false;
+                for (const selector of loginSelectors) {
+                    const count = await this.page.locator(selector).count();
+                    if (count > 0) {
+                        isLogged = true;
+                        console.log(`[FB Browser] Login confirmed via: ${selector}`);
+                        break;
+                    }
+                }
                 if (isLogged) {
                     console.log('[FB Browser] ✅ Cookie login successful');
                     this.isLoggedIn = true;
@@ -123,8 +145,8 @@ class FacebookBrowser {
             if (this.credentials.email && this.credentials.password) {
                 console.log('[FB Browser] Using email/password login');
                 await this.page.goto('https://www.facebook.com/', {
-                    waitUntil: 'networkidle',
-                    timeout: 30000
+                    waitUntil: 'domcontentloaded',
+                    timeout: 60000
                 });
                 await randomDelay(1000, 2000);
                 // Accept cookies if popup appears
@@ -142,7 +164,7 @@ class FacebookBrowser {
                 // Click login button
                 await this.page.click('button[name="login"], button[data-testid="royal_login_button"]');
                 // Wait for navigation
-                await this.page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 });
+                await this.page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 });
                 await randomDelay(2000, 4000);
                 // Check for 2FA or security checkpoint
                 const url = this.page.url();
@@ -150,8 +172,15 @@ class FacebookBrowser {
                     console.log('[FB Browser] ⚠️ 2FA or security checkpoint detected');
                     return false;
                 }
-                // Verify login
-                const isLogged = await this.page.locator('[aria-label="Tài khoản của bạn"], [aria-label="Your account"], [aria-label="Account"]').count() > 0;
+                // Verify login using multiple selectors
+                const loginCheckSelectors = ['[aria-label="Menu"]', '[aria-label="Trang chủ"]', 'a[href*="/me"]'];
+                let isLogged = false;
+                for (const sel of loginCheckSelectors) {
+                    if (await this.page.locator(sel).count() > 0) {
+                        isLogged = true;
+                        break;
+                    }
+                }
                 if (isLogged) {
                     console.log('[FB Browser] ✅ Email/password login successful');
                     this.isLoggedIn = true;
@@ -191,8 +220,8 @@ class FacebookBrowser {
             const postUrl = `https://www.facebook.com/${postId}`;
             console.log(`[FB Browser] Navigating to post: ${postUrl}`);
             await this.page.goto(postUrl, {
-                waitUntil: 'networkidle',
-                timeout: 30000
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
             });
             await randomDelay(2000, 4000);
             // Scroll down a bit to simulate reading
@@ -285,22 +314,27 @@ class FacebookBrowser {
             throw new Error('Browser not initialized');
         }
         try {
-            console.log(`[FB Browser] Getting posts from page: ${pageId}`);
+            console.log(`[FB Browser] 📍 Getting posts from page: ${pageId}`);
+            console.log(`[FB Browser] 📍 Step 1/3: Navigating to page...`);
             await this.page.goto(`https://www.facebook.com/${pageId}`, {
-                waitUntil: 'networkidle',
-                timeout: 30000
+                waitUntil: 'domcontentloaded',
+                timeout: 60000
             });
+            console.log(`[FB Browser] ✅ Page loaded`);
+            console.log(`[FB Browser] 📍 Step 2/3: Scrolling to load posts...`);
             await randomDelay(2000, 4000);
             // Scroll to load more posts
             for (let i = 0; i < 3; i++) {
+                console.log(`[FB Browser]    Scroll ${i + 1}/3...`);
                 await humanScroll(this.page);
                 await randomDelay(1000, 2000);
             }
+            console.log(`[FB Browser] 📍 Step 3/3: Extracting post links...`);
             // Extract post links
             const postLinks = await this.page.evaluate(() => {
                 const links = [];
                 const anchors = document.querySelectorAll('a[href*="/posts/"], a[href*="/videos/"], a[href*="/reel/"]');
-                anchors.forEach(a => {
+                anchors.forEach((a) => {
                     const href = a.getAttribute('href');
                     if (href && !links.includes(href)) {
                         links.push(href);
@@ -308,7 +342,10 @@ class FacebookBrowser {
                 });
                 return links.slice(0, 20);
             });
-            console.log(`[FB Browser] Found ${postLinks.length} posts`);
+            console.log(`[FB Browser] ✅ Found ${postLinks.length} posts`);
+            if (postLinks.length > 0) {
+                console.log(`[FB Browser]    First post: ${postLinks[0].substring(0, 60)}...`);
+            }
             return postLinks.slice(0, limit);
         }
         catch (error) {
