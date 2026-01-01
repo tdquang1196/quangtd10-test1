@@ -102,8 +102,19 @@ class FacebookBrowser {
             // Try cookie-based login first
             if (this.credentials.cookies) {
                 console.log('[FB Browser] 📍 Step 2/4: Parsing cookies...');
-                const cookies = JSON.parse(this.credentials.cookies);
-                console.log(`[FB Browser] ✅ Found ${cookies.length} cookies: ${cookies.map((c) => c.name).join(', ')}`);
+                const rawCookies = JSON.parse(this.credentials.cookies);
+                console.log(`[FB Browser] ✅ Found ${rawCookies.length} cookies: ${rawCookies.map((c) => c.name).join(', ')}`);
+                // Normalize cookies to Playwright format
+                const cookies = rawCookies.map((c) => ({
+                    name: c.name,
+                    value: c.value,
+                    domain: c.domain || '.facebook.com',
+                    path: c.path || '/',
+                    secure: c.secure !== undefined ? c.secure : true,
+                    httpOnly: c.httpOnly !== undefined ? c.httpOnly : false,
+                    sameSite: c.sameSite || 'Lax',
+                    expires: c.expires || c.expirationDate || (Date.now() / 1000 + 86400 * 365), // 1 year default
+                }));
                 console.log('[FB Browser] 📍 Step 3/4: Adding cookies to browser...');
                 await this.context.addCookies(cookies);
                 console.log('[FB Browser] ✅ Cookies added');
