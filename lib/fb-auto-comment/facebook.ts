@@ -120,11 +120,15 @@ export async function getPageCommentsOnPost(
 ): Promise<string[]> {
     const comments: string[] = [];
     // filter=toplevel gets only top-level comments (not replies)
-    // Include created_time field for filtering
-    let nextUrl: string | null = `${BASE_URL}/${postId}/comments?fields=id,message,from,created_time&filter=toplevel&limit=200&access_token=${accessToken}`;
+    // Include is_hidden field to detect hidden/spam comments
+    let nextUrl: string | null = `${BASE_URL}/${postId}/comments?fields=id,message,from,created_time,is_hidden,can_hide&filter=toplevel&limit=200&access_token=${accessToken}`;
     let pageCount = 0;
     const maxPages = 20; // Safety limit to prevent infinite loops
     const afterTimeMs = afterTime ? new Date(afterTime).getTime() : null;
+
+    let totalComments = 0;
+    let hiddenCount = 0;
+    let fromOthersCount = 0;
 
     console.log(`[getPageCommentsOnPost] Fetching comments for post ${postId}, afterTime: ${afterTime || 'none'}`);
 
@@ -138,8 +142,28 @@ export async function getPageCommentsOnPost(
                 break;
             }
 
-            // Filter to only page's comments
-            let filteredComments = data.data.filter((c: any) => c.from?.id === pageId);
+            totalComments += data.data.length;
+
+            // Log hidden comments for debugging
+            const hiddenComments = data.data.filter((c: any) => c.is_hidden === true);
+            hiddenCount += hiddenComments.length;
+            if (hiddenComments.length > 0) {
+                console.log(`[getPageCommentsOnPost] Found ${hiddenComments.length} HIDDEN comments:`,
+                    hiddenComments.map((c: any) => ({ id: c.id, from: c.from?.name, message: c.message?.substring(0, 50) }))
+                );
+            }
+
+            // Log comments from others (not from page)
+            const fromOthers = data.data.filter((c: any) => c.from?.id !== pageId);
+            fromOthersCount += fromOthers.length;
+            if (fromOthers.length > 0) {
+                console.log(`[getPageCommentsOnPost] Found ${fromOthers.length} comments from OTHER users (not page):`,
+                    fromOthers.map((c: any) => ({ id: c.id, from: c.from?.name, fromId: c.from?.id, message: c.message?.substring(0, 50) }))
+                );
+            }
+
+            // Filter to only page's comments (excluding hidden ones)
+            let filteredComments = data.data.filter((c: any) => c.from?.id === pageId && c.is_hidden !== true);
 
             // If afterTime is specified, filter comments created after that time
             if (afterTimeMs) {
@@ -167,7 +191,11 @@ export async function getPageCommentsOnPost(
         }
     }
 
-    console.log(`[getPageCommentsOnPost] Post ${postId}: Found ${comments.length} comments from page (${pageCount} pages)`);
+    console.log(`[getPageCommentsOnPost] Post ${postId} SUMMARY:`);
+    console.log(`  - Total comments from API: ${totalComments}`);
+    console.log(`  - Hidden comments: ${hiddenCount}`);
+    console.log(`  - Comments from other users: ${fromOthersCount}`);
+    console.log(`  - Valid page comments: ${comments.length}`);
     return comments;
 }
 
@@ -227,4 +255,182 @@ export async function verifyAccess(
     } catch (error: any) {
         return { success: false, error: error.message };
     }
+}
+
+/**
+ * Unhide a specific comment
+ * @param commentId - The ID of the comment to unhide
+ * @param accessToken - Page access token
+ */
+export async function unhideComment(
+    commentId: string,
+    accessToken: string
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        const response = await fetch(`${BASE_URL}/${commentId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                is_hidden: 'false',
+                access_token: accessToken,
+            }),
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            console.error(`Error unhiding comment ${commentId}:`, data.error.message);
+            return { success: false, error: data.error.message };
+        }
+
+        console.log(`[unhideComment] Successfully unhid comment ${commentId}`);
+        return { success: true };
+    } catch (error: any) {
+        console.error('Error unhiding comment:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Get all comments on a post (including hidden ones) with is_hidden status
+ */
+export async function getCommentsWithStatus(
+    postId: string,
+    accessToken: string
+): Promise<{ id: string; message: string; is_hidden: boolean; from?: { id: string; name: string }; created_time: string }[]> {
+    const comments: any[] = [];
+    let nextUrl: string | null = `${BASE_URL}/${postId}/comments?fields=id,message,from,created_time,is_hidden,can_hide&limit=200&access_token=${accessToken}`;
+    let pageCount = 0;
+    const maxPages = 10;
+
+    while (nextUrl && pageCount < maxPages) {
+        try {
+            const response: Response = await fetch(nextUrl);
+            const data: any = await response.json();
+
+            if (data.error) {
+                console.error('Error fetching comments:', data.error);
+                break;
+            }
+
+            comments.push(...data.data);
+            nextUrl = data.paging?.next || null;
+            pageCount++;
+
+            if (nextUrl) {
+                await new Promise(r => setTimeout(r, 500));
+            }
+        } catch (error) {
+            console.error('Error in getCommentsWithStatus:', error);
+            break;
+        }
+    }
+
+    return comments;
+}
+
+/**
+ * Get all hidden comments on a post
+ */
+export async function getHiddenComments(
+    postId: string,
+    accessToken: string
+): Promise<{ id: string; message: string; from?: { id: string; name: string }; created_time: string }[]> {
+    const allComments = await getCommentsWithStatus(postId, accessToken);
+    return allComments.filter(c => c.is_hidden === true);
+}
+
+/**
+ * Unhide all hidden comments on a post
+ * @returns Object with success count and failed comments
+ */
+export async function unhideAllCommentsOnPost(
+    postId: string,
+    accessToken: string,
+    pageId?: string // Optional: only unhide comments from this page
+): Promise<{ unhidden: number; failed: number; errors: string[] }> {
+    console.log(`[unhideAllCommentsOnPost] Starting for post ${postId}`);
+
+    const hiddenComments = await getHiddenComments(postId, accessToken);
+    console.log(`[unhideAllCommentsOnPost] Found ${hiddenComments.length} hidden comments`);
+
+    let unhidden = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const comment of hiddenComments) {
+        // If pageId is specified, only unhide comments from that page
+        if (pageId && comment.from?.id !== pageId) {
+            console.log(`[unhideAllCommentsOnPost] Skipping comment from other user: ${comment.from?.name}`);
+            continue;
+        }
+
+        const result = await unhideComment(comment.id, accessToken);
+        if (result.success) {
+            unhidden++;
+        } else {
+            failed++;
+            errors.push(`${comment.id}: ${result.error}`);
+        }
+
+        // Delay between unhides to avoid rate limiting
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    console.log(`[unhideAllCommentsOnPost] Completed: ${unhidden} unhidden, ${failed} failed`);
+    return { unhidden, failed, errors };
+}
+
+/**
+ * Scan all posts and unhide all hidden comments from the page
+ */
+export async function unhideAllPageComments(
+    pageId: string,
+    accessToken: string,
+    maxPosts: number = 50
+): Promise<{
+    postsScanned: number;
+    totalUnhidden: number;
+    totalFailed: number;
+    postResults: { postId: string; unhidden: number; failed: number }[]
+}> {
+    console.log(`[unhideAllPageComments] Starting scan for page ${pageId}`);
+
+    // Get all posts
+    const posts = await getAllPosts(pageId, accessToken);
+    const postsToScan = posts.slice(0, maxPosts);
+    console.log(`[unhideAllPageComments] Scanning ${postsToScan.length} posts`);
+
+    let totalUnhidden = 0;
+    let totalFailed = 0;
+    const postResults: { postId: string; unhidden: number; failed: number }[] = [];
+
+    for (const post of postsToScan) {
+        const result = await unhideAllCommentsOnPost(post.id, accessToken, pageId);
+
+        if (result.unhidden > 0 || result.failed > 0) {
+            postResults.push({
+                postId: post.id,
+                unhidden: result.unhidden,
+                failed: result.failed
+            });
+        }
+
+        totalUnhidden += result.unhidden;
+        totalFailed += result.failed;
+
+        // Delay between posts
+        await new Promise(r => setTimeout(r, 1000));
+    }
+
+    console.log(`[unhideAllPageComments] Completed: ${postsToScan.length} posts scanned, ${totalUnhidden} unhidden, ${totalFailed} failed`);
+
+    return {
+        postsScanned: postsToScan.length,
+        totalUnhidden,
+        totalFailed,
+        postResults
+    };
 }

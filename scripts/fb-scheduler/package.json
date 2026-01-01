@@ -1,16 +1,20 @@
 {
     "name": "fb-scheduler-worker",
-    "version": "1.0.0",
-    "description": "Background worker for FB Auto-Comment Scheduler",
+    "version": "2.0.0",
+    "description": "Background worker for FB Auto-Comment Scheduler with Browser Automation",
     "main": "dist/worker.js",
     "scripts": {
         "build": "tsc",
         "start": "node dist/worker.js",
-        "dev": "ts-node worker.ts"
+        "start:browser": "node dist/browser-worker.js",
+        "dev": "ts-node worker.ts",
+        "dev:browser": "ts-node browser-worker.ts",
+        "postinstall": "npx playwright install chromium"
     },
     "dependencies": {
         "@supabase/supabase-js": "^2.39.0",
-        "dotenv": "^16.3.1"
+        "dotenv": "^16.3.1",
+        "playwright": "^1.40.0"
     },
     "devDependencies": {
         "@types/node": "^20.10.0",

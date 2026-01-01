@@ -38,7 +38,18 @@ export async function GET() {
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { accessToken, pageId, delayBetweenComments, intervalMinutes, comments } = body;
+        const {
+            accessToken,
+            pageId,
+            delayBetweenComments,
+            intervalMinutes,
+            comments,
+            // Browser mode fields
+            fbEmail,
+            fbPassword,
+            fbCookies,
+            useBrowserMode
+        } = body;
 
         const updates: any = {};
 
@@ -56,6 +67,12 @@ export async function POST(request: NextRequest) {
         if (delayBetweenComments !== undefined) updates.delay_between_comments = delayBetweenComments;
         if (intervalMinutes !== undefined) updates.interval_minutes = intervalMinutes;
         if (comments !== undefined) updates.comments = comments;
+
+        // Browser mode fields
+        if (fbEmail !== undefined) updates.fb_email = fbEmail;
+        if (fbPassword !== undefined) updates.fb_password = fbPassword;
+        if (fbCookies !== undefined) updates.fb_cookies = fbCookies;
+        if (useBrowserMode !== undefined) updates.use_browser_mode = useBrowserMode;
 
         // Only update if there are changes
         if (Object.keys(updates).length === 0) {

@@ -1,22 +1,26 @@
-# FB Auto-Comment Worker Dockerfile
+# FB Auto-Comment Browser Worker Dockerfile
+# Uses Playwright for browser automation
 # For deployment on Railway
 
-FROM node:20-alpine
+FROM mcr.microsoft.com/playwright:v1.40.0-jammy
 
 WORKDIR /app
 
-# Copy package files from scripts/fb-scheduler
+# Copy package files
 COPY scripts/fb-scheduler/package*.json ./
 
 # Install dependencies
 RUN npm install
 
-# Copy source files from scripts/fb-scheduler
+# Copy source files
 COPY scripts/fb-scheduler/*.ts ./
 COPY scripts/fb-scheduler/tsconfig.json ./
 
 # Build TypeScript
 RUN npm run build
 
-# Start the worker
-CMD ["npm", "start"]
+# Default to browser worker (can override with WORKER_MODE env var)
+ENV WORKER_MODE=browser
+
+# Start script that chooses between regular and browser worker
+CMD if [ "$WORKER_MODE" = "browser" ]; then node dist/browser-worker.js; else node dist/worker.js; fi
