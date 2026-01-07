@@ -114,7 +114,8 @@ import {
   LOGIN_RATE,
   MAX_CONCURRENT_GROUPS,
   DEFAULT_CLASS_START_DATE,
-  DEFAULT_CLASS_END_DATE
+  DEFAULT_CLASS_END_DATE,
+  getCurrentYear
 } from './migrationConstants'
 
 /**

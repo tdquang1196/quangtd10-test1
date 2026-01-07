@@ -3,6 +3,8 @@
  * Handles username/displayname generation and Vietnamese text processing
  */
 
+import { DEFAULT_YEAR } from '@/lib/migrationConstants'
+
 /**
  * Remove Vietnamese diacritics using Unicode normalization
  * Example: "Nguyễn Văn A" → "Nguyen Van A"
@@ -449,12 +451,12 @@ export function parseBirthDateAndAge(dateValue: string | number | Date | null | 
 }
 
 /**
- * Generate class name from school prefix, grade, and current year
- * Format: SCHOOLPREFIX_GRADE_CURRENTYEAR (all uppercase)
+ * Generate class name from school prefix, grade, and year
+ * Format: SCHOOLPREFIX_GRADE_YEAR (all uppercase)
+ * Uses DEFAULT_YEAR from migrationConstants
  */
 export function generateClassName(schoolPrefix: string, grade: string): string {
-  const currentYear = new Date().getFullYear();
-  return `${schoolPrefix}_${grade}_${currentYear}`.toUpperCase();
+  return `${schoolPrefix}_${grade}_${DEFAULT_YEAR}`.toUpperCase();
 }
 
 /**

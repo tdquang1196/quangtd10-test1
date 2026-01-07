@@ -46,11 +46,30 @@ export const DEFAULT_MAX_RETRIES = 3
 
 // ==================== CLASS CONFIGURATION ====================
 
-/** Default class start date for new classes */
-export const DEFAULT_CLASS_START_DATE = '2025-01-01T00:00:00.000Z'
+/** 
+ * Default year for class naming and date configuration
+ * Change this value when starting a new school year
+ */
+export const DEFAULT_YEAR = 2025
 
-/** Default class end date for new classes */
-export const DEFAULT_CLASS_END_DATE = '2026-04-01T00:00:00.000Z'
+/** Get current year for class naming - uses DEFAULT_YEAR constant */
+export const getCurrentYear = (): number => DEFAULT_YEAR
+
+/** Get class start date (January 1st of DEFAULT_YEAR) */
+export const getClassStartDate = (): string => {
+    return `${DEFAULT_YEAR}-06-01T00:00:00.000Z`
+}
+
+/** Get class end date (April 1st of DEFAULT_YEAR + 1) */
+export const getClassEndDate = (): string => {
+    return `${DEFAULT_YEAR + 1}-04-01T00:00:00.000Z`
+}
+
+/** @deprecated Use getClassStartDate() instead - kept for backward compatibility */
+export const DEFAULT_CLASS_START_DATE = getClassStartDate()
+
+/** @deprecated Use getClassEndDate() instead - kept for backward compatibility */
+export const DEFAULT_CLASS_END_DATE = getClassEndDate()
 
 // ==================== BATCH PROCESSING ====================
 
